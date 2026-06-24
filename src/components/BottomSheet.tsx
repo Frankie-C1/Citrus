@@ -4,54 +4,83 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type FormEvent,
   type PointerEvent,
 } from "react";
-import type { CreateMovementInput, Group, MovementType } from "../types";
+import type { CreateMovementInput, Group, GroupMembership, MovementType, Scope } from "../types";
+import { GroupVisual } from "./GroupVisual";
 import { Icon } from "./Icon";
 
 type BottomSheetProps = {
   open: boolean;
   groups: Group[];
+  memberships: GroupMembership[];
+  isAuthenticated: boolean;
   onClose: () => void;
-  onCreate: (movement: CreateMovementInput) => void;
+  onAuth: () => void;
+  onJoinCode: (code: string) => Promise<void> | void;
+  onCreate: (movement: CreateMovementInput) => Promise<void> | void;
 };
 
-const typeLabels: Array<{ id: MovementType; label: string }> = [
-  { id: "problem", label: "Problem" },
-  { id: "idea", label: "Idee" },
-  { id: "improvement", label: "Verbesserung" },
-  { id: "question", label: "Frage" },
+const typeLabels: Array<{ id: MovementType; emoji: string; label: string; hint: string }> = [
+  { id: "problem", emoji: "!", label: "Problem", hint: "Etwas funktioniert nicht oder stört." },
+  { id: "idea", emoji: "💡", label: "Idee", hint: "Ein neuer Vorschlag, der etwas besser macht." },
+  { id: "improvement", emoji: "↗", label: "Verbesserung", hint: "Etwas Bestehendes soll optimiert werden." },
+  { id: "question", emoji: "?", label: "Frage", hint: "Du willst etwas klären oder sichtbar machen." },
 ];
 
-const typeDescriptions: Record<MovementType, string> = {
-  problem: "Etwas blockiert Wirkung.",
-  idea: "Ein neuer Impuls.",
-  improvement: "Etwas kann besser werden.",
-  question: "Ein Thema braucht Klarheit.",
-};
+const quickEmoji = ["💡", "🌱", "🚲", "🏀", "📚", "🚌", "🎧", "✨"];
 
-export function BottomSheet({ open, groups, onClose, onCreate }: BottomSheetProps) {
-  const [selectedGroupId, setSelectedGroupId] = useState(groups[0]?.id ?? "");
+export function BottomSheet({
+  open,
+  groups,
+  memberships,
+  isAuthenticated,
+  onClose,
+  onAuth,
+  onJoinCode,
+  onCreate,
+}: BottomSheetProps) {
+  const [step, setStep] = useState(1);
+  const [selectedScope, setSelectedScope] = useState<Scope | "">("");
+  const [selectedGroupId, setSelectedGroupId] = useState("");
   const [publicSearch, setPublicSearch] = useState("");
-  const [type, setType] = useState<MovementType>("idea");
+  const [inviteCode, setInviteCode] = useState("");
+  const [type, setType] = useState<MovementType | "">("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("");
+  const [emoji, setEmoji] = useState("💡");
+  const [imageFile, setImageFile] = useState<File | undefined>();
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [joining, setJoining] = useState(false);
   const [dragY, setDragY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const dragStartY = useRef(0);
 
-  const selectedGroup = groups.find((group) => group.id === selectedGroupId) ?? groups[0];
-  const internalGroups = groups.filter((group) => group.scope === "internal");
+  const internalMemberships = memberships.filter((membership) => membership.group.scope === "internal");
   const publicGroups = groups.filter((group) => group.scope === "external");
+  const selectedGroup =
+    selectedScope === "internal"
+      ? internalMemberships.find((membership) => membership.groupId === selectedGroupId)?.group
+      : groups.find((group) => group.id === selectedGroupId);
+
   const publicResults = useMemo(() => {
     const query = publicSearch.trim().toLowerCase();
-    const pool = publicGroups.length ? publicGroups : groups;
-    if (!query) return pool.slice(0, 5);
-    return pool
+    if (!query) return publicGroups.slice(0, 8);
+    return publicGroups
       .filter((group) => `${group.name} ${group.category}`.toLowerCase().includes(query))
-      .slice(0, 6);
-  }, [groups, publicGroups, publicSearch]);
+      .slice(0, 10);
+  }, [publicGroups, publicSearch]);
+
+  const hasDraft = Boolean(selectedScope || selectedGroupId || type || title || description || imageFile);
+  const totalSteps = 6;
+  const canContinue =
+    (step === 1 && Boolean(selectedScope)) ||
+    (step === 2 && Boolean(selectedGroup)) ||
+    (step === 3 && Boolean(type)) ||
+    (step === 4 && Boolean(title.trim()) && Boolean(description.trim())) ||
+    step === 5;
 
   useEffect(() => {
     if (!open) {
@@ -61,8 +90,35 @@ export function BottomSheet({ open, groups, onClose, onCreate }: BottomSheetProp
   }, [open]);
 
   useEffect(() => {
-    if (!selectedGroupId && groups[0]) setSelectedGroupId(groups[0].id);
-  }, [groups, selectedGroupId]);
+    if (!imageFile) {
+      setPreviewUrl("");
+      return;
+    }
+    const url = URL.createObjectURL(imageFile);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [imageFile]);
+
+  function resetDraft() {
+    setStep(1);
+    setSelectedScope("");
+    setSelectedGroupId("");
+    setPublicSearch("");
+    setInviteCode("");
+    setType("");
+    setTitle("");
+    setDescription("");
+    setCategory("");
+    setEmoji("💡");
+    setImageFile(undefined);
+    setSubmitting(false);
+  }
+
+  function requestClose() {
+    if (hasDraft && !window.confirm("Entwurf verwerfen?")) return;
+    resetDraft();
+    onClose();
+  }
 
   function startDrag(event: PointerEvent<HTMLButtonElement>) {
     if (!open) return;
@@ -81,32 +137,53 @@ export function BottomSheet({ open, groups, onClose, onCreate }: BottomSheetProp
     event.currentTarget.releasePointerCapture(event.pointerId);
     setIsDragging(false);
     if (dragY > 96) {
-      onClose();
       setDragY(0);
+      requestClose();
       return;
     }
     setDragY(0);
   }
 
-  function submitMovement(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selectedGroup || !title.trim()) return;
+  function goNext() {
+    if (!canContinue) return;
+    setStep((current) => Math.min(totalSteps, current + 1));
+  }
 
-    onCreate({
-      title: title.trim(),
-      description: description.trim() || "Ein neuer Impuls aus der Citrus-Community.",
-      groupId: selectedGroup.id,
-      groupName: selectedGroup.name,
-      scope: selectedGroup.scope,
-      type,
-      category: selectedGroup.category,
-    });
+  function autoNext(nextStep: number) {
+    window.setTimeout(() => setStep(nextStep), 120);
+  }
 
-    setTitle("");
-    setDescription("");
-    setType("idea");
-    setPublicSearch("");
-    onClose();
+  async function joinCode() {
+    if (inviteCode.length !== 5) return;
+    setJoining(true);
+    try {
+      await onJoinCode(inviteCode);
+      setInviteCode("");
+    } finally {
+      setJoining(false);
+    }
+  }
+
+  async function submitMovement() {
+    if (!selectedGroup || !type || !title.trim() || !description.trim()) return;
+    setSubmitting(true);
+    try {
+      await onCreate({
+        title: title.trim(),
+        description: description.trim(),
+        groupId: selectedGroup.id,
+        groupName: selectedGroup.name,
+        scope: selectedGroup.scope,
+        type,
+        category: category.trim() || selectedGroup.category,
+        emoji,
+        imageFile,
+      });
+      resetDraft();
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   const sheetStyle = {
@@ -115,7 +192,7 @@ export function BottomSheet({ open, groups, onClose, onCreate }: BottomSheetProp
 
   return (
     <>
-      <div className={`sheet-backdrop ${open ? "open" : ""}`} onClick={onClose} />
+      <div className={`sheet-backdrop ${open ? "open" : ""}`} onClick={requestClose} />
       <aside
         className={`bottom-sheet ${open ? "open" : ""} ${isDragging ? "dragging" : ""}`}
         aria-hidden={!open}
@@ -130,131 +207,256 @@ export function BottomSheet({ open, groups, onClose, onCreate }: BottomSheetProp
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
         />
-        <div className="sheet-header">
+
+        <div className="wizard-header">
+          <button className="wizard-back" type="button" onClick={() => setStep((current) => Math.max(1, current - 1))} disabled={step === 1}>
+            Zurück
+          </button>
           <div>
-            <span className="eyebrow">Citrus</span>
-            <h2>Wo möchtest du beitragen?</h2>
+            <strong>{step} von {totalSteps}</strong>
+            <div className="wizard-dots">
+              {Array.from({ length: totalSteps }).map((_, index) => (
+                <span className={index + 1 <= step ? "active" : ""} key={index} />
+              ))}
+            </div>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="Schließen">
+          <button className="icon-button" type="button" onClick={requestClose} aria-label="Schließen">
             <Icon name="x" size={20} />
           </button>
         </div>
 
-        <div className="sheet-section">
-          <h3>Intern</h3>
-          <div className="internal-grid">
-            {internalGroups.map((group) => (
-              <button
-                className={`internal-card ${selectedGroupId === group.id ? "active" : ""}`}
-                type="button"
-                key={group.id}
-                onClick={() => setSelectedGroupId(group.id)}
-              >
-                <span>{group.icon || group.name.slice(0, 1)}</span>
-                <strong>{group.name}</strong>
-                <small>{group.category}</small>
-              </button>
-            ))}
-          </div>
+        <div className="wizard-body">
+          {step === 1 ? (
+            <section className="wizard-step">
+              <h2>Wo möchtest du etwas bewegen?</h2>
+              <div className="context-tiles">
+                <button
+                  className={`context-tile ${selectedScope === "internal" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setSelectedScope("internal");
+                    setSelectedGroupId("");
+                    autoNext(2);
+                  }}
+                >
+                  <span>🏛</span>
+                  <strong>Intern</strong>
+                  <small>Für Gruppen, denen du beigetreten bist.</small>
+                </button>
+                <button
+                  className={`context-tile ${selectedScope === "external" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setSelectedScope("external");
+                    setSelectedGroupId(publicGroups[0]?.id ?? "");
+                    setCategory(publicGroups[0]?.category ?? "");
+                    autoNext(2);
+                  }}
+                >
+                  <span>✨</span>
+                  <strong>Extern</strong>
+                  <small>Für Apps, Marken, Städte und Produkte.</small>
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          {step === 2 && selectedScope === "internal" ? (
+            <section className="wizard-step">
+              <h2>Interne Gruppe wählen</h2>
+              {!isAuthenticated ? (
+                <button className="public-create-row" type="button" onClick={onAuth}>
+                  <span className="public-icon">C</span>
+                  <span>
+                    <strong>Anmelden</strong>
+                    <small>Melde dich an, um interne Gruppen zu sehen.</small>
+                  </span>
+                  <Icon name="chevron" size={17} />
+                </button>
+              ) : internalMemberships.length ? (
+                <div className="wizard-list">
+                  {internalMemberships.map((membership) => (
+                    <button
+                      className={`public-result ${selectedGroupId === membership.groupId ? "active" : ""}`}
+                      type="button"
+                      key={membership.id}
+                      onClick={() => {
+                        setSelectedGroupId(membership.groupId);
+                        setCategory(membership.group.category);
+                        autoNext(3);
+                      }}
+                    >
+                      <GroupVisual group={membership.group} className="public-avatar" />
+                      <span>
+                        <strong>{membership.group.name}</strong>
+                        <small>{membership.group.category} · Intern</small>
+                      </span>
+                      <Icon name="chevron" size={16} />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state compact-empty">
+                  <strong>Keine interne Gruppe.</strong>
+                  <span>Gib einen 5-stelligen Einladungscode ein.</span>
+                  <div className="invite-mini">
+                    <input
+                      value={inviteCode}
+                      onChange={(event) => setInviteCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))}
+                      placeholder="5-stelliger Code"
+                      maxLength={5}
+                    />
+                    <button type="button" onClick={joinCode} disabled={inviteCode.length !== 5 || joining}>
+                      {joining ? "Beitreten..." : "Gruppe beitreten"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+          ) : null}
+
+          {step === 2 && selectedScope === "external" ? (
+            <section className="wizard-step">
+              <h2>Externe Gruppe wählen</h2>
+              <label className="public-search">
+                <Icon name="search" size={18} />
+                <input
+                  value={publicSearch}
+                  onChange={(event) => setPublicSearch(event.target.value)}
+                  placeholder="Apps, Marken oder Städte suchen"
+                />
+              </label>
+              <span className="wizard-subtitle">Häufig verwendet</span>
+              <div className="wizard-list">
+                {publicResults.map((group) => (
+                  <button
+                    className={`public-result ${selectedGroupId === group.id ? "active" : ""}`}
+                    type="button"
+                    key={group.id}
+                    onClick={() => {
+                      setSelectedGroupId(group.id);
+                      setCategory(group.category);
+                      setPublicSearch(group.name);
+                      autoNext(3);
+                    }}
+                  >
+                    <GroupVisual group={group} className="public-avatar" />
+                    <span>
+                      <strong>{group.name}</strong>
+                      <small>{group.category}</small>
+                    </span>
+                    <Icon name="chevron" size={16} />
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {step === 3 ? (
+            <section className="wizard-step">
+              <h2>Was möchtest du teilen?</h2>
+              <div className="type-list">
+                {typeLabels.map((item) => (
+                  <button
+                    className={`type-option ${type === item.id ? "active" : ""}`}
+                    type="button"
+                    key={item.id}
+                    onClick={() => {
+                      setType(item.id);
+                      autoNext(4);
+                    }}
+                  >
+                    <span>{item.emoji}</span>
+                    <strong>{item.label}</strong>
+                    <small>{item.hint}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {step === 4 ? (
+            <section className="wizard-step">
+              <h2>Beschreibe deine Bewegung</h2>
+              <label>
+                Titel
+                <input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={90} placeholder="Was soll sich bewegen?" />
+                <small>{title.length}/90</small>
+              </label>
+              <label>
+                Beschreibung
+                <textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={800} rows={6} placeholder="Beschreibe konkret, was sich ändern soll." />
+                <small>{description.length}/800</small>
+              </label>
+              <label>
+                Kategorie
+                <input value={category} onChange={(event) => setCategory(event.target.value)} maxLength={40} placeholder={selectedGroup?.category || "Optional"} />
+              </label>
+              <div className="conduct-inline">
+                Bitte bleib sachlich. Keine Beleidigungen, keine Hetze, keine verfassungsfeindlichen Inhalte und keine persönlichen Angriffe.
+              </div>
+            </section>
+          ) : null}
+
+          {step === 5 ? (
+            <section className="wizard-step">
+              <h2>Wie soll dein Thema erscheinen?</h2>
+              <div className="emoji-row">
+                <label>
+                  Emoji wählen
+                  <input value={emoji} onChange={(event) => setEmoji(event.target.value.slice(0, 4))} maxLength={4} />
+                </label>
+                <div>
+                  {quickEmoji.map((item) => (
+                    <button type="button" key={item} onClick={() => setEmoji(item)}>{item}</button>
+                  ))}
+                </div>
+              </div>
+              {previewUrl ? (
+                <div className="image-preview">
+                  <img src={previewUrl} alt="" />
+                  <button type="button" onClick={() => setImageFile(undefined)}>Bild entfernen</button>
+                </div>
+              ) : null}
+              <label className="file-picker">
+                <span>Foto wählen</span>
+                <small>{imageFile ? imageFile.name : "Wird vor Upload auf AVIF oder WebP komprimiert."}</small>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/avif"
+                  onChange={(event) => setImageFile(event.target.files?.[0])}
+                />
+              </label>
+            </section>
+          ) : null}
+
+          {step === 6 ? (
+            <section className="wizard-step">
+              <h2>Vorschau</h2>
+              <article className="movement-card preview-card">
+                {previewUrl ? <img className="reel-image" src={previewUrl} alt="" /> : <span className="movement-emoji">{emoji}</span>}
+                <h3>{title || "Dein Titel"}</h3>
+                <p>{selectedGroup?.name} · {typeLabels.find((item) => item.id === type)?.label || "Typ"} · Eingereicht</p>
+                <div className="movement-meta">
+                  <strong>0 Unterstützer</strong>
+                  <span>{description.slice(0, 110)}</span>
+                </div>
+              </article>
+            </section>
+          ) : null}
         </div>
 
-        <div className="sheet-section public-section">
-          <h3>Öffentlich</h3>
-          <button
-            className="public-create-row"
-            type="button"
-            onClick={() => {
-              const firstPublicGroup = publicGroups[0];
-              if (firstPublicGroup) setSelectedGroupId(firstPublicGroup.id);
-            }}
-          >
-            <span className="public-icon">+</span>
-            <span>
-              <strong>Öffentlichen Beitrag erstellen</strong>
-              <small>Für Apps, Marken, Städte oder Produkte</small>
-            </span>
-            <Icon name="chevron" size={17} />
-          </button>
-          <label className="public-search">
-            <Icon name="search" size={18} />
-            <input
-              value={publicSearch}
-              onChange={(event) => setPublicSearch(event.target.value)}
-              placeholder="Öffentliche Gruppen, Apps oder Marken suchen"
-            />
-          </label>
-          <div className="public-results">
-            {publicResults.map((group) => (
-              <button
-                className={`public-result ${selectedGroupId === group.id ? "active" : ""}`}
-                type="button"
-                key={group.id}
-                onClick={() => {
-                  setSelectedGroupId(group.id);
-                  setPublicSearch(group.name);
-                }}
-              >
-                <span className="public-avatar">{group.icon || group.name.slice(0, 1)}</span>
-                <span>
-                  <strong>{group.name}</strong>
-                  <small>{group.category} · Öffentlich</small>
-                </span>
-                <Icon name="chevron" size={16} />
-              </button>
-            ))}
-          </div>
-          {selectedGroup ? <div className="selected-context">Ausgewählt: {selectedGroup.name}</div> : null}
+        <div className="wizard-footer">
+          {step < totalSteps ? (
+            <button className="primary-button" type="button" onClick={goNext} disabled={!canContinue}>
+              Weiter
+            </button>
+          ) : (
+            <button className="primary-button" type="button" onClick={submitMovement} disabled={submitting || !selectedGroup || !type || !title.trim() || !description.trim()}>
+              {submitting ? "Wird gespeichert..." : "Bewegung starten"}
+            </button>
+          )}
         </div>
-
-        <form className="create-form" onSubmit={submitMovement}>
-          <h3>Was möchtest du teilen?</h3>
-          <div className="type-list">
-            {typeLabels.map((item) => (
-              <button
-                className={`type-option ${type === item.id ? "active" : ""}`}
-                type="button"
-                key={item.id}
-                onClick={() => setType(item.id)}
-              >
-                <span />
-                <strong>{item.label}</strong>
-                <small>{typeDescriptions[item.id]}</small>
-              </button>
-            ))}
-          </div>
-          <label>
-            Titel
-            <input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="Was soll sich bewegen?"
-              maxLength={80}
-            />
-          </label>
-          <label>
-            Kurze Beschreibung
-            <textarea
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="Kurz, konkret und lösungsorientiert."
-              rows={3}
-              maxLength={220}
-            />
-          </label>
-          <label>
-            Gruppe/Kontext
-            <select value={selectedGroupId} onChange={(event) => setSelectedGroupId(event.target.value)}>
-              {groups.map((group) => (
-                <option value={group.id} key={group.id}>
-                  {group.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button className="primary-button" type="submit" disabled={!title.trim() || !selectedGroup}>
-            Bewegung starten
-          </button>
-        </form>
       </aside>
     </>
   );

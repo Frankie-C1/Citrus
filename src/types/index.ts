@@ -9,21 +9,30 @@ export type MovementStatus =
 
 export type MovementType = "problem" | "idea" | "improvement" | "question";
 
+export type UserRole = "user" | "admin";
+
 export type Profile = {
   id: string;
   email: string;
+  username: string;
   displayName: string;
   avatarUrl?: string | null;
+  role: UserRole;
+  hasSeenConductNotice: boolean;
+  deletionRequestedAt?: string | null;
+  deletedAt?: string | null;
   createdAt?: string;
 };
 
 export type User = {
   id: string;
   name: string;
+  username?: string;
   email?: string;
   avatarInitials: string;
   influence: number;
   groupIds: string[];
+  role?: UserRole;
 };
 
 export type Group = {
@@ -34,7 +43,18 @@ export type Group = {
   members: number;
   accent: string;
   icon?: string | null;
+  logoUrl?: string | null;
   description?: string | null;
+  inviteCode?: string | null;
+};
+
+export type GroupMembership = {
+  id: string;
+  groupId: string;
+  userId: string;
+  role: "member" | "admin";
+  joinedAt: string;
+  group: Group;
 };
 
 export type Update = {
@@ -48,8 +68,10 @@ export type Movement = {
   title: string;
   description: string;
   emoji: string;
+  imageUrl?: string | null;
   groupId: string;
   groupName: string;
+  groupIcon?: string | null;
   scope: Scope;
   type: MovementType;
   supporters: number;
@@ -58,7 +80,28 @@ export type Movement = {
   category: string;
   updates: Update[];
   supportedByUser: boolean;
+  userSupportCreatedAt?: string;
   userId?: string | null;
+  authorUsername?: string | null;
+  reportCount?: number;
+  createdAt?: string;
+  recentSupporters?: number;
+  recentUpdates?: number;
+  trendingScore?: number;
+  supportHistory?: number[];
+  activityHistory?: number[];
+};
+
+export type Notification = {
+  id: string;
+  title: string;
+  body: string;
+  type?: string | null;
+  movementId?: string | null;
+  targetType?: string | null;
+  targetId?: string | null;
+  isAdminNotification?: boolean;
+  isRead: boolean;
   createdAt?: string;
 };
 
@@ -70,6 +113,21 @@ export type CreateMovementInput = {
   scope: Scope;
   type: MovementType;
   category: string;
+  emoji?: string;
+  imageUrl?: string;
+  imageFile?: File;
+};
+
+export type UpdateMovementInput = {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  type: MovementType;
+  emoji?: string;
+  imageUrl?: string | null;
+  removeImage?: boolean;
+  imageFile?: File;
 };
 
 export type UserStats = {
@@ -84,9 +142,63 @@ export type UserStats = {
   weeklyReach: number[];
 };
 
+export type AdminUserResult = {
+  id: string;
+  email: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+};
+
 export type Tab = "home" | "feed" | "insights" | "profile";
 
 export type Toast = {
   id: number;
   message: string;
+};
+
+export type NotificationFrequency = "off" | "daily" | "instant";
+
+export type ThemePreference = "light" | "dark" | "system";
+
+export type PrivacyVisibility = "visible" | "anonymous";
+
+export type FeedPreferences = {
+  prioritizeForYou: boolean;
+  onlyGroups: boolean;
+  highlightSupported: boolean;
+  boostTrending: boolean;
+  newestFirst: boolean;
+};
+
+export type UserSettings = {
+  theme: ThemePreference;
+  privacyVisibility: PrivacyVisibility;
+  feedPreferences: FeedPreferences;
+};
+
+export type NotificationPreferences = {
+  newGroupPosts: NotificationFrequency;
+  ownPostSupport: NotificationFrequency;
+  supportedUpdates: NotificationFrequency;
+  groupTrending: NotificationFrequency;
+  implementedProjects: NotificationFrequency;
+  groupIds: string[];
+};
+
+export type SettingsBundle = {
+  userSettings: UserSettings;
+  notificationPreferences: NotificationPreferences;
+  interests: string[];
+};
+
+export type FeedbackInput = {
+  subject: string;
+  body: string;
+};
+
+export type ModerationSummary = {
+  blockedUsers: Array<{ id: string; username: string; createdAt?: string }>;
+  reportedContents: Array<{ id: string; title: string; reason?: string; createdAt?: string }>;
+  ownReports: Array<{ id: string; title: string; reason?: string; createdAt?: string }>;
 };

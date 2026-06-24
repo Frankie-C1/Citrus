@@ -15,5 +15,5 @@ export const supabase = createClient(supabaseUrl || "https://missing.supabase.co
 
 export function getSupabaseConfigError() {
   if (isSupabaseConfigured) return "";
-  return "Supabase ist nicht konfiguriert. Bitte VITE_SUPABASE_URL und VITE_SUPABASE_ANON_KEY setzen.";
+  return "Supabase Environment Variables fehlen: VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY";
 }

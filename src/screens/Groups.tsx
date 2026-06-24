@@ -1,5 +1,5 @@
-import type { CSSProperties } from "react";
 import type { Group } from "../types";
+import { GroupVisual } from "../components/GroupVisual";
 
 type GroupsProps = {
   groups: Group[];
@@ -21,9 +21,7 @@ export function Groups({ groups, onBack, onOpenGroup }: GroupsProps) {
       <div className="group-list">
         {groups.map((group) => (
           <button className="group-card" type="button" key={group.id} onClick={() => onOpenGroup(group.id)}>
-            <span className="group-avatar" style={{ "--accent": group.accent } as CSSProperties}>
-              {group.icon || group.name.slice(0, 1)}
-            </span>
+            <GroupVisual group={group} className="group-avatar" />
             <span>
               <strong>{group.name}</strong>
               <small>

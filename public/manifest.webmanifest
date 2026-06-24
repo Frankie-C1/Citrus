@@ -1,0 +1,17 @@
+{
+  "name": "Citrus",
+  "short_name": "Citrus",
+  "description": "Community- und Prioritaetenplattform fuer Bewegungen.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F3F0EA",
+  "theme_color": "#F3F0EA",
+  "icons": [
+    {
+      "src": "/citrus-star.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

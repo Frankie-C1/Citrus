@@ -9,6 +9,10 @@ type IconProps = {
     | "profile"
     | "search"
     | "chevron"
+    | "chevronRight"
+    | "arrowUpRight"
+    | "checkCircle"
+    | "list"
     | "x"
     | "share"
     | "flag"
@@ -79,6 +83,29 @@ export function Icon({ name, size = 22 }: IconProps) {
       </>
     ),
     chevron: <path d="m6 9 6 6 6-6" />,
+    chevronRight: <path d="m9 18 6-6-6-6" />,
+    arrowUpRight: (
+      <>
+        <path d="M7 17 17 7" />
+        <path d="M9 7h8v8" />
+      </>
+    ),
+    checkCircle: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="m8.5 12.5 2.2 2.2 4.8-5.2" />
+      </>
+    ),
+    list: (
+      <>
+        <path d="M8 6h12" />
+        <path d="M8 12h12" />
+        <path d="M8 18h12" />
+        <path d="M4 6h.01" />
+        <path d="M4 12h.01" />
+        <path d="M4 18h.01" />
+      </>
+    ),
     x: (
       <>
         <path d="M18 6 6 18" />
@@ -120,15 +147,8 @@ export function Icon({ name, size = 22 }: IconProps) {
     ),
     settings: (
       <>
-        <circle cx="12" cy="12" r="3" />
-        <path d="M12 2v3" />
-        <path d="M12 19v3" />
-        <path d="M4.9 4.9 7 7" />
-        <path d="m17 17 2.1 2.1" />
-        <path d="M2 12h3" />
-        <path d="M19 12h3" />
-        <path d="m4.9 19.1 2.1-2.1" />
-        <path d="m17 7 2.1-2.1" />
+        <path d="M10.2 2.8h3.6l.5 2.3c.5.2 1 .4 1.5.7l2-1.2 2.5 2.5-1.2 2c.3.5.5 1 .7 1.5l2.3.5v3.6l-2.3.5c-.2.5-.4 1-.7 1.5l1.2 2-2.5 2.5-2-1.2c-.5.3-1 .5-1.5.7l-.5 2.3h-3.6l-.5-2.3c-.5-.2-1-.4-1.5-.7l-2 1.2-2.5-2.5 1.2-2c-.3-.5-.5-1-.7-1.5l-2.3-.5v-3.6l2.3-.5c.2-.5.4-1 .7-1.5l-1.2-2 2.5-2.5 2 1.2c.5-.3 1-.5 1.5-.7l.5-2.3Z" />
+        <circle cx="12" cy="12" r="3.2" />
       </>
     ),
     rules: (

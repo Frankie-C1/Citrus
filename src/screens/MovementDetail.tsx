@@ -27,6 +27,7 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
 
       <section className="detail-hero">
         <span className="movement-emoji large">{movement.emoji}</span>
+        {movement.imageUrl ? <img className="detail-image" src={movement.imageUrl} alt="" /> : null}
         <h1>{movement.title}</h1>
         <p>{movement.description}</p>
         <strong>{movement.supporters.toLocaleString("de-DE")} Unterstützer</strong>

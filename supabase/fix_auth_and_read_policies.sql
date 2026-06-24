@@ -14,29 +14,6 @@ create table if not exists public.profiles (
   updated_at timestamptz default now()
 );
 
-alter table public.profiles add column if not exists email text unique;
-alter table public.profiles add column if not exists username text unique;
-alter table public.profiles add column if not exists display_name text;
-alter table public.profiles add column if not exists avatar_url text;
-alter table public.profiles add column if not exists role text default 'user';
-alter table public.profiles add column if not exists has_seen_conduct_notice boolean default false;
-alter table public.profiles add column if not exists deleted_at timestamptz;
-alter table public.profiles add column if not exists deletion_requested_at timestamptz;
-alter table public.profiles add column if not exists created_at timestamptz default now();
-alter table public.profiles add column if not exists updated_at timestamptz default now();
-
-update public.profiles
-set username = coalesce(username, 'user_' || substr(replace(id::text, '-', ''), 1, 8)),
-    display_name = coalesce(display_name, username, split_part(coalesce(email, 'citrus'), '@', 1)),
-    role = coalesce(role, 'user'),
-    has_seen_conduct_notice = coalesce(has_seen_conduct_notice, false)
-where username is null or role is null or has_seen_conduct_notice is null;
-
-alter table public.profiles alter column username set not null;
-alter table public.profiles drop constraint if exists profiles_role_check;
-alter table public.profiles add constraint profiles_role_check check (role in ('user', 'admin')) not valid;
-alter table public.profiles validate constraint profiles_role_check;
-
 create table if not exists public.groups (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -49,22 +26,6 @@ create table if not exists public.groups (
   created_by uuid references public.profiles(id),
   created_at timestamptz default now(),
   updated_at timestamptz default now()
-);
-
-alter table public.groups add column if not exists icon text;
-alter table public.groups add column if not exists logo_url text;
-alter table public.groups add column if not exists description text;
-alter table public.groups add column if not exists invite_code text unique;
-alter table public.groups add column if not exists created_by uuid references public.profiles(id);
-alter table public.groups add column if not exists updated_at timestamptz default now();
-
-create table if not exists public.group_members (
-  id uuid primary key default gen_random_uuid(),
-  group_id uuid references public.groups(id) on delete cascade,
-  user_id uuid references public.profiles(id) on delete cascade,
-  role text default 'member' check (role in ('member', 'admin')),
-  joined_at timestamptz default now(),
-  unique (group_id, user_id)
 );
 
 create table if not exists public.movements (
@@ -84,12 +45,6 @@ create table if not exists public.movements (
   updated_at timestamptz default now()
 );
 
-alter table public.movements add column if not exists scope text default 'external' check (scope in ('internal', 'external'));
-alter table public.movements add column if not exists emoji text;
-alter table public.movements add column if not exists image_url text;
-alter table public.movements add column if not exists report_count integer default 0;
-alter table public.movements add column if not exists updated_at timestamptz default now();
-
 create table if not exists public.supports (
   id uuid primary key default gen_random_uuid(),
   movement_id uuid references public.movements(id) on delete cascade,
@@ -106,7 +61,36 @@ create table if not exists public.movement_updates (
   created_at timestamptz default now()
 );
 
-alter table public.movement_updates add column if not exists created_by uuid references public.profiles(id);
+alter table public.profiles add column if not exists email text unique;
+alter table public.profiles add column if not exists username text unique;
+alter table public.profiles add column if not exists display_name text;
+alter table public.profiles add column if not exists avatar_url text;
+alter table public.profiles add column if not exists role text default 'user';
+alter table public.profiles add column if not exists has_seen_conduct_notice boolean default false;
+alter table public.profiles add column if not exists deleted_at timestamptz;
+alter table public.profiles add column if not exists deletion_requested_at timestamptz;
+alter table public.profiles add column if not exists created_at timestamptz default now();
+alter table public.profiles add column if not exists updated_at timestamptz default now();
+
+update public.profiles
+set username = coalesce(username, 'user_' || substr(replace(id::text, '-', ''), 1, 8)),
+    role = coalesce(role, 'user'),
+    has_seen_conduct_notice = coalesce(has_seen_conduct_notice, false)
+where username is null or role is null or has_seen_conduct_notice is null;
+
+alter table public.profiles alter column username set not null;
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check check (role in ('user', 'admin')) not valid;
+alter table public.profiles validate constraint profiles_role_check;
+
+create table if not exists public.group_members (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid references public.groups(id) on delete cascade,
+  user_id uuid references public.profiles(id) on delete cascade,
+  role text default 'member' check (role in ('member', 'admin')),
+  joined_at timestamptz default now(),
+  unique (group_id, user_id)
+);
 
 create table if not exists public.reports (
   id uuid primary key default gen_random_uuid(),
@@ -116,27 +100,16 @@ create table if not exists public.reports (
   created_at timestamptz default now()
 );
 
-create or replace function public.set_updated_at()
-returns trigger
-language plpgsql
-as $$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$$;
-
-drop trigger if exists profiles_set_updated_at on public.profiles;
-create trigger profiles_set_updated_at before update on public.profiles
-for each row execute function public.set_updated_at();
-
-drop trigger if exists groups_set_updated_at on public.groups;
-create trigger groups_set_updated_at before update on public.groups
-for each row execute function public.set_updated_at();
-
-drop trigger if exists movements_set_updated_at on public.movements;
-create trigger movements_set_updated_at before update on public.movements
-for each row execute function public.set_updated_at();
+alter table public.groups add column if not exists logo_url text;
+alter table public.groups add column if not exists invite_code text unique;
+alter table public.groups add column if not exists created_by uuid references public.profiles(id);
+alter table public.groups add column if not exists updated_at timestamptz default now();
+alter table public.movements add column if not exists scope text default 'external' check (scope in ('internal', 'external'));
+alter table public.movements add column if not exists emoji text;
+alter table public.movements add column if not exists image_url text;
+alter table public.movements add column if not exists report_count integer default 0;
+alter table public.movements add column if not exists updated_at timestamptz default now();
+alter table public.movement_updates add column if not exists created_by uuid references public.profiles(id);
 
 create or replace function public.is_admin()
 returns boolean
@@ -175,38 +148,6 @@ as $$
   );
 $$;
 
-create or replace function public.handle_new_user()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  wanted_username text;
-begin
-  wanted_username := nullif(trim(coalesce(new.raw_user_meta_data ->> 'username', split_part(new.email, '@', 1))), '');
-  wanted_username := regexp_replace(wanted_username, '[^A-Za-z0-9_]', '_', 'g');
-
-  insert into public.profiles (id, email, username, display_name)
-  values (
-    new.id,
-    new.email,
-    wanted_username,
-    coalesce(nullif(trim(new.raw_user_meta_data ->> 'display_name'), ''), wanted_username)
-  )
-  on conflict (id) do update
-  set email = excluded.email,
-      username = coalesce(public.profiles.username, excluded.username),
-      display_name = coalesce(public.profiles.display_name, excluded.display_name);
-  return new;
-end;
-$$;
-
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-after insert on auth.users
-for each row execute function public.handle_new_user();
-
 create or replace function public.join_group_by_code(code text)
 returns public.groups
 language plpgsql
@@ -236,25 +177,6 @@ begin
   return target_group;
 end;
 $$;
-
-create or replace function public.increment_report_count()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  update public.movements
-  set report_count = coalesce(report_count, 0) + 1
-  where id = new.movement_id;
-  return new;
-end;
-$$;
-
-drop trigger if exists reports_increment_movement_count on public.reports;
-create trigger reports_increment_movement_count
-after insert on public.reports
-for each row execute function public.increment_report_count();
 
 alter table public.profiles enable row level security;
 alter table public.groups enable row level security;
@@ -306,10 +228,10 @@ create policy group_members_read_own_or_admin on public.group_members
 for select to authenticated
 using (user_id = auth.uid() or public.is_admin());
 
-drop policy if exists group_members_admin_insert on public.group_members;
-create policy group_members_admin_insert on public.group_members
+drop policy if exists group_members_insert_own on public.group_members;
+create policy group_members_insert_own on public.group_members
 for insert to authenticated
-with check (public.is_admin());
+with check (user_id = auth.uid());
 
 drop policy if exists group_members_admin_delete on public.group_members;
 create policy group_members_admin_delete on public.group_members
@@ -319,21 +241,14 @@ using (public.is_admin());
 drop policy if exists movements_read_visible on public.movements;
 create policy movements_read_visible on public.movements
 for select to anon, authenticated
-using (
-  scope = 'external'
-  or public.is_admin()
-  or public.can_read_group(group_id)
-);
+using (scope = 'external' or public.is_admin() or public.can_read_group(group_id));
 
 drop policy if exists movements_insert_own on public.movements;
 create policy movements_insert_own on public.movements
 for insert to authenticated
 with check (
   user_id = auth.uid()
-  and (
-    scope = 'external'
-    or public.can_read_group(group_id)
-  )
+  and (scope = 'external' or public.can_read_group(group_id))
 );
 
 drop policy if exists movements_update_own on public.movements;
@@ -400,18 +315,6 @@ drop policy if exists reports_admin_read on public.reports;
 create policy reports_admin_read on public.reports
 for select to authenticated
 using (public.is_admin());
-
-create index if not exists profiles_username_idx on public.profiles(username);
-create index if not exists groups_scope_idx on public.groups(scope);
-create index if not exists groups_invite_code_idx on public.groups(invite_code);
-create index if not exists group_members_user_id_idx on public.group_members(user_id);
-create index if not exists group_members_group_id_idx on public.group_members(group_id);
-create index if not exists movements_group_id_idx on public.movements(group_id);
-create index if not exists movements_user_id_idx on public.movements(user_id);
-create index if not exists supports_movement_id_idx on public.supports(movement_id);
-create index if not exists supports_user_id_idx on public.supports(user_id);
-create index if not exists movement_updates_movement_id_idx on public.movement_updates(movement_id);
-create index if not exists reports_movement_id_idx on public.reports(movement_id);
 
 grant usage on schema public to anon, authenticated;
 

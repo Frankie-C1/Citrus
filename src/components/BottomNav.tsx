@@ -7,9 +7,9 @@ type BottomNavProps = {
   onPlus: () => void;
 };
 
-const tabs: Array<{ id: Tab; label: string; icon: "home" | "activity" | "chart" | "profile" }> = [
+const tabs: Array<{ id: Tab; label: string; icon: "home" | "list" | "chart" | "profile" }> = [
   { id: "home", label: "Home", icon: "home" },
-  { id: "feed", label: "Feed", icon: "activity" },
+  { id: "feed", label: "Feed", icon: "list" },
   { id: "insights", label: "Insights", icon: "chart" },
   { id: "profile", label: "Profil", icon: "profile" },
 ];
@@ -22,7 +22,7 @@ export function BottomNav({ activeTab, onTabChange, onPlus }: BottomNavProps) {
         type="button"
         onClick={() => onTabChange("home")}
       >
-        <Icon name="home" size={21} />
+        <Icon name="home" size={27} />
         <span>Home</span>
       </button>
       <button
@@ -30,18 +30,18 @@ export function BottomNav({ activeTab, onTabChange, onPlus }: BottomNavProps) {
         type="button"
         onClick={() => onTabChange("feed")}
       >
-        <Icon name="activity" size={21} />
+        <Icon name="list" size={27} />
         <span>Feed</span>
       </button>
       <button className="nav-plus" type="button" onClick={onPlus} aria-label="Beitrag erstellen">
-        <Icon name="plus" size={29} />
+        <Icon name="plus" size={40} />
       </button>
       <button
         className={`nav-item ${activeTab === tabs[2].id ? "active" : ""}`}
         type="button"
         onClick={() => onTabChange("insights")}
       >
-        <Icon name="chart" size={21} />
+        <Icon name="chart" size={28} />
         <span>Insights</span>
       </button>
       <button
@@ -49,7 +49,7 @@ export function BottomNav({ activeTab, onTabChange, onPlus }: BottomNavProps) {
         type="button"
         onClick={() => onTabChange("profile")}
       >
-        <Icon name="profile" size={21} />
+        <Icon name="profile" size={28} />
         <span>Profil</span>
       </button>
     </nav>

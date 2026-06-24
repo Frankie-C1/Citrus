@@ -1,4 +1,5 @@
 import type { Movement } from "../types";
+import { GroupVisual } from "./GroupVisual";
 import { Icon } from "./Icon";
 
 type MovementReelCardProps = {
@@ -24,11 +25,23 @@ export function MovementReelCard({
   onShare,
   onReport,
 }: MovementReelCardProps) {
+  const groupVisual = {
+    name: movement.groupName,
+    icon: movement.groupIcon,
+    scope: movement.scope,
+    category: movement.category,
+    accent: movement.scope === "external" ? "#22c55e" : "#111111",
+  };
+
   return (
-    <article className="reel-card">
+    <article className={`reel-card ${movement.imageUrl ? "has-image" : "emoji-reel"}`}>
+      {movement.imageUrl ? <img className="reel-bg-image" src={movement.imageUrl} alt="" loading="lazy" /> : null}
+      {!movement.imageUrl ? <div className="reel-emoji-bg" aria-hidden="true">{movement.emoji || "✦"}</div> : null}
+      <div className="reel-overlay" aria-hidden="true" />
+
       <div className="reel-main">
         <div className="movement-topline">
-          <span className="movement-emoji">{movement.emoji}</span>
+          <GroupVisual group={groupVisual} />
           <span className="status-badge">{statusLabels[movement.status]}</span>
         </div>
         <span className="reel-group">{movement.groupName} · {movement.category}</span>

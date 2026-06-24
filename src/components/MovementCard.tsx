@@ -1,4 +1,5 @@
 import type { Movement } from "../types";
+import { GroupVisual } from "./GroupVisual";
 
 type MovementCardProps = {
   movement: Movement;
@@ -22,10 +23,17 @@ export function MovementCard({
   onToggleSupport,
 }: MovementCardProps) {
   const growthText = `+${movement.weeklyGrowth.toLocaleString("de-DE")} Stimmen`;
+  const groupVisual = {
+    name: movement.groupName,
+    icon: movement.groupIcon,
+    scope: movement.scope,
+    category: movement.category,
+    accent: movement.scope === "external" ? "#22c55e" : "#111111",
+  };
 
   return (
     <article
-      className={`movement-card ${variant}`}
+      className={`movement-card ${variant} ${movement.imageUrl ? "has-image" : ""}`}
       role="button"
       tabIndex={0}
       onClick={() => onOpen(movement)}
@@ -33,10 +41,12 @@ export function MovementCard({
         if (event.key === "Enter" || event.key === " ") onOpen(movement);
       }}
     >
+      {movement.imageUrl ? <img src={movement.imageUrl} alt="" className="movement-card-bg" loading="lazy" /> : null}
       <div className="movement-topline">
-        <span className="movement-emoji">{movement.emoji}</span>
+        <GroupVisual group={groupVisual} />
         <span className="status-badge">{statusLabels[movement.status]}</span>
       </div>
+      {!movement.imageUrl ? <div className="movement-card-emoji" aria-hidden="true">{movement.emoji}</div> : null}
       <h3>{movement.title}</h3>
       <p>{movement.groupName} · {movement.category}</p>
       <div className="movement-meta">

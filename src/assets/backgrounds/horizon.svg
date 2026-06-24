@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1200" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08111f"/>
+      <stop offset=".48" stop-color="#17233b"/>
+      <stop offset="1" stop-color="#3d1634"/>
+    </linearGradient>
+    <radialGradient id="star" cx="52%" cy="30%" r="45%">
+      <stop offset="0" stop-color="#fff7b8" stop-opacity=".95"/>
+      <stop offset=".18" stop-color="#ff7a1a" stop-opacity=".62"/>
+      <stop offset=".52" stop-color="#7c3aed" stop-opacity=".24"/>
+      <stop offset="1" stop-color="#08111f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#121a2b" stop-opacity=".1"/>
+      <stop offset="1" stop-color="#030712"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="1200" fill="url(#sky)"/>
+  <rect width="900" height="1200" fill="url(#star)"/>
+  <path d="M0 780c130-70 260-80 390-28 128 51 245 38 510-80v528H0z" fill="url(#ground)"/>
+  <path d="M0 800c160-46 300-48 420-6 132 46 260 28 480-64" fill="none" stroke="#fff" stroke-opacity=".15" stroke-width="2"/>
+  <path d="M450 210l18 70 70 18-70 18-18 70-18-70-70-18 70-18z" fill="#fff7b8" opacity=".9"/>
+</svg>
