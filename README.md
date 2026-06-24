@@ -1,10 +1,10 @@
 # Citrus
 
-Citrus ist eine mobile-first Community- und Prioritaetenplattform. Dieses MVP nutzt React, Vite, TypeScript und Supabase.
+Citrus ist eine mobile-first Community- und Prioritätenplattform. Dieses MVP nutzt React, Vite, TypeScript und Supabase.
 
 ## Lokal starten
 
-1. Abhaengigkeiten installieren:
+1. Abhängigkeiten installieren:
 
 ```bash
 npm install
@@ -15,6 +15,7 @@ npm install
 ```bash
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-supabase-publishable-key
+VITE_VAPID_PUBLIC_KEY=your-public-vapid-key
 ```
 
 3. Dev-Server starten:
@@ -23,7 +24,7 @@ VITE_SUPABASE_ANON_KEY=your-supabase-publishable-key
 npm run dev
 ```
 
-4. Build pruefen:
+4. Build prüfen:
 
 ```bash
 npm run build
@@ -31,7 +32,7 @@ npm run build
 
 ## Supabase Setup
 
-Fuehre die SQL-Dateien im Supabase SQL Editor in dieser Reihenfolge aus:
+Führe die SQL-Dateien im Supabase SQL Editor in dieser Reihenfolge aus:
 
 1. `supabase/schema.sql`
 2. `supabase/storage.sql`
@@ -44,14 +45,14 @@ Fuehre die SQL-Dateien im Supabase SQL Editor in dieser Reihenfolge aus:
 9. Admin-Konto in der App registrieren oder im Dashboard unter Authentication -> Users erstellen
 10. `supabase/admin_setup.sql`
 
-Wenn Login, Profilanlage, Posting-Rechte oder oeffentliche Leserechte blockieren, fuehre mindestens diese Fix-Dateien erneut aus:
+Wenn Login, Profilanlage, Posting-Rechte oder öffentliche Leserechte blockieren, führe mindestens diese Fix-Dateien erneut aus:
 
 ```text
 supabase/fix_auth_and_read_policies.sql
 supabase/posting_features.sql
 ```
 
-Fuer MVP-Tests sollte in Supabase Dashboard unter `Authentication -> Providers -> Email` die Option `Confirm email` ausgeschaltet werden. Sonst erzeugt Supabase zwar den Auth-User, aber die App kann die Session erst nach E-Mail-Bestaetigung nutzen.
+Für MVP-Tests sollte in Supabase Dashboard unter `Authentication -> Providers -> Email` die Option `Confirm email` ausgeschaltet werden. Sonst erzeugt Supabase zwar den Auth-User, aber die App kann die Session erst nach E-Mail-Bestätigung nutzen.
 
 Wenn im Login `Email not confirmed` erscheint, ist genau diese Einstellung die Ursache.
 
@@ -65,20 +66,23 @@ Registriere dich zuerst normal in der App mit:
 - E-Mail: `Fcarone@web.de`
 - Passwort: `wygher-befzak`
 
-Alternativ kannst du den Auth-User im Supabase Dashboard manuell mit E-Mail und Passwort erstellen. Danach `supabase/admin_setup.sql` im SQL Editor ausfuehren. Der Profil-Tab zeigt dann den Bereich `Verwaltung`.
+Alternativ kannst du den Auth-User im Supabase Dashboard manuell mit E-Mail und Passwort erstellen. Danach `supabase/admin_setup.sql` im SQL Editor ausführen. Der Profil-Tab zeigt dann den Bereich `Verwaltung`.
 
 ## Netlify Deploy
 
-GitHub-Repository mit Netlify verbinden und setzen:
+GitHub-Repository mit Netlify verbinden. Die Datei `netlify.toml` setzt bereits:
 
 - Build Command: `npm run build`
 - Publish Directory: `dist`
+- SPA Redirect: `/* -> /index.html`
+- Node-Version: `22`
 
 Environment Variables in Netlify:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
+- `VITE_VAPID_PUBLIC_KEY`
 
 ## Storage
 
-`supabase/storage.sql` und `supabase/posting_features.sql` erstellen den Bucket `movement-media`. Die App komprimiert Bilder clientseitig auf maximal 1600px Breite und nutzt AVIF, wenn der Browser AVIF-Encoding unterstuetzt. Fallback ist WebP. Uploads liegen unter `{user_id}/{timestamp}.avif|webp` und die Storage Policy erlaubt Schreibzugriff nur auf den eigenen User-Pfad.
+`supabase/storage.sql` und `supabase/posting_features.sql` erstellen den Bucket `movement-media`. Die App komprimiert Bilder clientseitig auf maximal 1600px Breite und nutzt AVIF, wenn der Browser AVIF-Encoding unterstützt. Fallback ist WebP. Uploads liegen unter `{user_id}/{timestamp}.avif|webp` und die Storage Policy erlaubt Schreibzugriff nur auf den eigenen User-Pfad.

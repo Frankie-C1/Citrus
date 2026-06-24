@@ -1,7 +1,7 @@
 {
   "name": "Citrus",
   "short_name": "Citrus",
-  "description": "Community- und Prioritaetenplattform fuer Bewegungen.",
+  "description": "Community- und Prioritätenplattform für Bewegungen.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F3F0EA",
