@@ -6,8 +6,8 @@
       <stop offset="1" stop-color="#14112c"/>
     </linearGradient>
     <radialGradient id="a" cx="50%" cy="38%" r="48%">
-      <stop offset="0" stop-color="#22c55e" stop-opacity=".52"/>
-      <stop offset=".36" stop-color="#38bdf8" stop-opacity=".28"/>
+      <stop offset="0" stop-color="#ffcc00" stop-opacity=".52"/>
+      <stop offset=".36" stop-color="#ffe066" stop-opacity=".28"/>
       <stop offset="1" stop-color="#000" stop-opacity="0"/>
     </radialGradient>
   </defs>

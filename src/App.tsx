@@ -10,6 +10,7 @@ import { Toast } from "./components/Toast";
 import {
   addSupport,
   createMovement,
+  createMovementUpdate,
   deleteMovement,
   deriveStats,
   fetchGroupMemberships,
@@ -30,6 +31,7 @@ import {
 import { getSupabaseConfigError } from "./lib/supabase";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { Feed } from "./screens/Feed";
+import { FirstRunFlow } from "./screens/FirstRunFlow";
 import { Groups } from "./screens/Groups";
 import { Home } from "./screens/Home";
 import { Insights } from "./screens/Insights";
@@ -53,6 +55,7 @@ import type {
 
 const STORAGE_KEYS = {
   onboarded: "citrus:onboarded",
+  firstRun: "citrus:first-run",
 };
 
 const defaultUserSettings: UserSettings = {
@@ -98,8 +101,9 @@ async function compressImage(file: File): Promise<{ blob: Blob; extension: "avif
   if (!file.type.startsWith("image/")) throw new Error("Bitte wähle eine Bilddatei.");
 
   const bitmap = await createImageBitmap(file);
-  const maxWidth = 1600;
-  const scale = Math.min(1, maxWidth / bitmap.width);
+  const maxWidth = 1440;
+  const maxHeight = 2560;
+  const scale = Math.min(1, maxWidth / bitmap.width, maxHeight / bitmap.height);
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);
@@ -107,12 +111,12 @@ async function compressImage(file: File): Promise<{ blob: Blob; extension: "avif
   if (!context) throw new Error("Bild konnte nicht verarbeitet werden.");
   context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
 
-  const toBlob = (type: string) =>
-    new Promise<Blob | null>((resolve) => canvas.toBlob((blob) => resolve(blob), type, 0.75));
+  const toBlob = (type: string, quality: number) =>
+    new Promise<Blob | null>((resolve) => canvas.toBlob((blob) => resolve(blob), type, quality));
 
-  const avif = await toBlob("image/avif");
+  const avif = await toBlob("image/avif", 0.45);
   if (avif) return { blob: avif, extension: "avif" };
-  const webp = await toBlob("image/webp");
+  const webp = await toBlob("image/webp", 0.64);
   if (webp) return { blob: webp, extension: "webp" };
   throw new Error("Dieser Browser kann das Bild nicht als AVIF oder WebP komprimieren.");
 }
@@ -120,6 +124,7 @@ async function compressImage(file: File): Promise<{ blob: Blob; extension: "avif
 function App() {
   const { authUser, profile, signOut, refreshProfile } = useAuth();
   const [onboarded, setOnboarded] = useState(() => localStorage.getItem(STORAGE_KEYS.onboarded) === "true");
+  const [firstRunCompleted, setFirstRunCompleted] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [scopeFilter, setScopeFilter] = useState<Scope | "all">("all");
   const [search, setSearch] = useState("");
@@ -142,6 +147,14 @@ function App() {
   const [dataError, setDataError] = useState(getSupabaseConfigError());
 
   const currentUserId = authUser?.id ?? null;
+
+  useEffect(() => {
+    if (!authUser) {
+      setFirstRunCompleted(true);
+      return;
+    }
+    setFirstRunCompleted(localStorage.getItem(`${STORAGE_KEYS.firstRun}:${authUser.id}`) === "true");
+  }, [authUser]);
 
   const loadData = useCallback(async () => {
     setLoadingData(true);
@@ -174,6 +187,14 @@ function App() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    if (sheetOpen || searchOpen) document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [sheetOpen, searchOpen]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -248,8 +269,16 @@ function App() {
   const filteredMovements = useMemo(() => {
     const query = search.trim().toLowerCase();
     const membershipGroupIds = new Set(memberships.map((membership) => membership.groupId));
-    return visibleMovements
-      .filter((movement) => (scopeFilter === "all" ? true : movement.scope === scopeFilter))
+    const deduped = [...new Map(visibleMovements.map((movement) => [movement.id, movement])).values()];
+    const filtered = deduped
+      .filter((movement) => Boolean(movement.imageUrl))
+      .filter((movement) => {
+        if (scopeFilter === "internal") return membershipGroupIds.has(movement.groupId);
+        if (scopeFilter === "external") {
+          return movement.scope === "external" && !membershipGroupIds.has(movement.groupId);
+        }
+        return movement.scope === "external" || membershipGroupIds.has(movement.groupId);
+      })
       .filter((movement) => (groupFilterId ? movement.groupId === groupFilterId : true))
       .filter((movement) => (userSettings.feedPreferences.onlyGroups ? membershipGroupIds.has(movement.groupId) : true))
       .filter((movement) => {
@@ -271,6 +300,11 @@ function App() {
           : b.weeklyGrowth + b.supporters - (a.weeklyGrowth + a.supporters);
         return supportBoost + trendingScore;
       });
+
+    if (userSettings.feedPreferences.newestFirst) return filtered;
+    const high = filtered.filter((_, index) => index % 4 !== 3);
+    const lower = filtered.filter((_, index) => index % 4 === 3).reverse();
+    return high.flatMap((movement, index) => (index > 0 && index % 3 === 0 && lower.length ? [lower.shift()!, movement] : [movement]));
   }, [groupFilterId, memberships, scopeFilter, search, userSettings.feedPreferences, visibleMovements]);
 
   function showToast(message: string) {
@@ -287,7 +321,15 @@ function App() {
     setActiveTab("home");
   }
 
+  function completeFirstRun(userId: string) {
+    localStorage.setItem(`${STORAGE_KEYS.firstRun}:${userId}`, "true");
+    setFirstRunCompleted(true);
+    completeOnboarding();
+  }
+
   async function saveMovement(input: CreateMovementInput, userId: string) {
+    if (!input.imageFile) throw new Error("Bitte füge ein Bild hinzu.");
+
     let imageUrl = input.imageUrl;
     if (input.imageFile) {
       const compressed = await compressImage(input.imageFile);
@@ -354,6 +396,20 @@ function App() {
     }
   }
 
+  async function handlePostMovementUpdate(id: string, text: string) {
+    if (!authUser) {
+      setAuthOpen(true);
+      return;
+    }
+    try {
+      await createMovementUpdate(id, authUser.id, text);
+      await loadData();
+      showToast("Update gepostet.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Update konnte nicht gespeichert werden.");
+    }
+  }
+
   async function handleToggleSupport(id: string) {
     if (!authUser) {
       setPendingAction({ type: "support", movementId: id });
@@ -383,7 +439,6 @@ function App() {
       } else {
         await addSupport(id, authUser.id);
       }
-      await loadData();
     } catch (error) {
       await loadData();
       showToast(error instanceof Error ? error.message : "Unterstützung konnte nicht gespeichert werden.");
@@ -406,6 +461,18 @@ function App() {
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Einladungscode ist ungültig.");
     }
+  }
+
+  async function handleJoinCitrusFirstRun(code: string) {
+    if (!authUser) {
+      setAuthOpen(true);
+      return;
+    }
+
+    await joinGroupByCode(code);
+    await loadData();
+    completeFirstRun(authUser.id);
+    showToast("Willkommen in der Citrus-Gruppe.");
   }
 
   async function handleLeaveGroup(membership: GroupMembership) {
@@ -547,7 +614,9 @@ function App() {
 
   function resetLocalApp() {
     localStorage.removeItem(STORAGE_KEYS.onboarded);
+    if (authUser) localStorage.removeItem(`${STORAGE_KEYS.firstRun}:${authUser.id}`);
     setOnboarded(false);
+    setFirstRunCompleted(false);
     setSearch("");
     setScopeFilter("all");
     setGroupFilterId(undefined);
@@ -558,12 +627,19 @@ function App() {
     showToast("Lokales Onboarding wurde zurückgesetzt.");
   }
 
-  if (!onboarded) {
+  if (!authUser) {
     return (
       <>
-        <Onboarding onComplete={completeOnboarding} onJoinCode={handleJoinCode} />
-        <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} onSuccess={() => setAuthOpen(false)} />
-        <ConductNotice open={Boolean(authUser && profile && !profile.hasSeenConductNotice)} onAccept={acceptConductNotice} />
+        <Onboarding onAuthenticated={completeOnboarding} />
+        <Toast toast={toast} />
+      </>
+    );
+  }
+
+  if (!firstRunCompleted) {
+    return (
+      <>
+        <FirstRunFlow onJoinCitrus={handleJoinCitrusFirstRun} />
         <Toast toast={toast} />
       </>
     );
@@ -596,6 +672,9 @@ function App() {
         onToggleSupport={handleToggleSupport}
         onShare={shareMovement}
         onReport={reportMovement}
+        canManage={Boolean(authUser && selectedMovement.userId === authUser.id)}
+        onPostUpdate={handlePostMovementUpdate}
+        onDelete={handleDeleteOwnMovement}
       />
     );
   } else if (notificationsOpen) {
@@ -636,6 +715,8 @@ function App() {
         onToggleSupport={handleToggleSupport}
         onShare={shareMovement}
         onReport={reportMovement}
+        onOpenGroup={openGroup}
+        onPlus={() => setSheetOpen(true)}
       />
     );
   } else if (activeTab === "insights") {
@@ -644,12 +725,10 @@ function App() {
         stats={stats}
         isAuthenticated={Boolean(authUser)}
         movements={visibleMovements}
+        groups={userGroups}
         userId={currentUserId}
         onAuth={() => setAuthOpen(true)}
         onOpenMovement={openMovement}
-        onToggleSupport={handleToggleSupport}
-        onUpdateMovement={handleUpdateMovement}
-        onDeleteMovement={handleDeleteOwnMovement}
       />
     );
   } else if (activeTab === "profile") {

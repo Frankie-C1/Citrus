@@ -9,8 +9,8 @@ self.addEventListener("push", (event) => {
   const title = payload.title || "Citrus";
   const options = {
     body: payload.body || "",
-    icon: "/citrus-star.svg",
-    badge: "/citrus-star.svg",
+    icon: "/android-chrome-192x192.png",
+    badge: "/favicon-32x32.png",
     data: {
       url: payload.url || "/?notifications=1",
       notificationId: payload.notificationId || null,

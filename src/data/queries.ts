@@ -94,6 +94,7 @@ type ProfileLiteRow = {
   email: string | null;
   username: string | null;
   display_name: string | null;
+  avatar_url?: string | null;
   role: UserRole | null;
 };
 
@@ -337,7 +338,7 @@ export async function fetchMovements(userId?: string | null) {
     supabase.from("supports").select("id,movement_id,user_id,created_at").in("movement_id", movementIds),
     supabase.from("movement_updates").select("id,movement_id,body,created_at").in("movement_id", movementIds),
     authorIds.length && userId
-      ? supabase.from("profiles").select("id,email,username,display_name,role").in("id", authorIds)
+      ? supabase.from("profiles").select("id,email,username,display_name,avatar_url,role").in("id", authorIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
 
@@ -346,12 +347,26 @@ export async function fetchMovements(userId?: string | null) {
   if (updatesResult.error) logSupabaseError("fetchMovements updates partial failure", updatesResult.error);
   if (profilesResult.error) logSupabaseError("fetchMovements profiles partial failure", profilesResult.error);
 
+  const supportRows = (supportsResult.data ?? []) as SupportRow[];
+  const supporterIds = [...new Set(supportRows.map((support) => support.user_id).filter(Boolean))] as string[];
+  const supporterProfilesResult = supporterIds.length
+    ? await supabase.from("profiles").select("id,email,username,display_name,avatar_url,role").in("id", supporterIds)
+    : { data: [], error: null };
+  if (supporterProfilesResult.error) {
+    logSupabaseError("fetchMovements supporter profiles partial failure", supporterProfilesResult.error);
+  }
+
   const groupsById = new Map(((groupsResult.data ?? []) as GroupRow[]).map((group) => [group.id, group]));
-  const profilesById = new Map(((profilesResult.data ?? []) as ProfileLiteRow[]).map((profile) => [profile.id, profile]));
+  const profilesById = new Map(
+    [
+      ...((profilesResult.data ?? []) as ProfileLiteRow[]),
+      ...((supporterProfilesResult.data ?? []) as ProfileLiteRow[]),
+    ].map((profile) => [profile.id, profile]),
+  );
   const supportsByMovement = new Map<string, SupportRow[]>();
   const updatesByMovement = new Map<string, UpdateRow[]>();
 
-  for (const support of ((supportsResult.data ?? []) as SupportRow[])) {
+  for (const support of supportRows) {
     supportsByMovement.set(support.movement_id, [...(supportsByMovement.get(support.movement_id) ?? []), support]);
   }
 
@@ -370,6 +385,17 @@ export async function fetchMovements(userId?: string | null) {
     const author = movement.user_id ? profilesById.get(movement.user_id) : undefined;
     const category = movement.category || group?.category || "Allgemein";
     const userSupport = userId ? supports.find((support) => support.user_id === userId) : undefined;
+    const supporterPreviews = supports
+      .slice()
+      .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())
+      .map((support) => (support.user_id ? profilesById.get(support.user_id) : undefined))
+      .filter((supporter): supporter is ProfileLiteRow => Boolean(supporter))
+      .slice(0, 3)
+      .map((supporter) => ({
+        id: supporter.id,
+        name: supporter.display_name || supporter.username || "Anonym",
+        avatarUrl: supporter.avatar_url,
+      }));
     const weeklyGrowth = countSince(supports, sevenDaysAgo);
     const recentSupporters = countSince(supports, threeDaysAgo);
     const recentUpdates = countSince(updates, threeDaysAgo);
@@ -408,6 +434,11 @@ export async function fetchMovements(userId?: string | null) {
       userSupportCreatedAt: userSupport?.created_at ?? undefined,
       userId: movement.user_id,
       authorUsername: author?.username,
+      authorDisplayName: author?.display_name,
+      authorAvatarUrl: author?.avatar_url,
+      authorRole: author?.role,
+      commentCount: updates.length,
+      supporterPreviews,
       reportCount: movement.report_count ?? 0,
       createdAt: movement.created_at ?? undefined,
       recentSupporters,
@@ -464,6 +495,19 @@ export async function addSupport(movementId: string, userId: string) {
   const { error } = await supabase.from("supports").insert({ movement_id: movementId, user_id: userId });
   if (error && error.code !== "23505") {
     logSupabaseError("addSupport failed", error);
+    throw error;
+  }
+}
+
+export async function createMovementUpdate(movementId: string, userId: string, text: string) {
+  requireSupabase();
+  const { error } = await supabase.from("movement_updates").insert({
+    movement_id: movementId,
+    body: text,
+    created_by: userId,
+  });
+  if (error) {
+    logSupabaseError("createMovementUpdate failed", error);
     throw error;
   }
 }
@@ -971,13 +1015,17 @@ export async function updateProfileSettings(input: {
   id: string;
   username: string;
   displayName: string;
+  avatarUrl?: string | null;
   hasSeenConductNotice?: boolean;
 }) {
   requireSupabase();
-  const payload: Record<string, string | boolean | undefined> = {
+  const payload: Record<string, string | boolean | null | undefined> = {
     username: input.username,
     display_name: input.displayName,
   };
+  if (typeof input.avatarUrl !== "undefined") {
+    payload.avatar_url = input.avatarUrl;
+  }
   if (typeof input.hasSeenConductNotice === "boolean") {
     payload.has_seen_conduct_notice = input.hasSeenConductNotice;
   }
@@ -986,6 +1034,22 @@ export async function updateProfileSettings(input: {
     logSupabaseError("updateProfileSettings failed", error);
     throw error;
   }
+}
+
+export async function uploadProfileAvatar(userId: string, file: Blob, extension: "avif" | "webp") {
+  requireSupabase();
+  const path = `${userId}/avatar-${Date.now()}.${extension}`;
+  const { error } = await supabase.storage.from("movement-media").upload(path, file, {
+    cacheControl: "31536000",
+    upsert: true,
+    contentType: `image/${extension}`,
+  });
+  if (error) {
+    logSupabaseError("uploadProfileAvatar failed", error);
+    throw error;
+  }
+  const { data } = supabase.storage.from("movement-media").getPublicUrl(path);
+  return data.publicUrl;
 }
 
 export async function markConductNoticeSeen(userId: string) {

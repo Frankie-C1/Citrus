@@ -51,6 +51,7 @@ export function BottomSheet({
   const [category, setCategory] = useState("");
   const [emoji, setEmoji] = useState("💡");
   const [imageFile, setImageFile] = useState<File | undefined>();
+  const [imageError, setImageError] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [joining, setJoining] = useState(false);
@@ -111,6 +112,7 @@ export function BottomSheet({
     setCategory("");
     setEmoji("💡");
     setImageFile(undefined);
+    setImageError("");
     setSubmitting(false);
   }
 
@@ -146,6 +148,10 @@ export function BottomSheet({
 
   function goNext() {
     if (!canContinue) return;
+    if (step === 5 && !imageFile) {
+      setImageError("Bitte füge ein Bild hinzu.");
+      return;
+    }
     setStep((current) => Math.min(totalSteps, current + 1));
   }
 
@@ -166,6 +172,10 @@ export function BottomSheet({
 
   async function submitMovement() {
     if (!selectedGroup || !type || !title.trim() || !description.trim()) return;
+    if (!imageFile) {
+      setImageError("Bitte füge ein Bild hinzu.");
+      return;
+    }
     setSubmitting(true);
     try {
       await onCreate({
@@ -400,18 +410,7 @@ export function BottomSheet({
 
           {step === 5 ? (
             <section className="wizard-step">
-              <h2>Wie soll dein Thema erscheinen?</h2>
-              <div className="emoji-row">
-                <label>
-                  Emoji wählen
-                  <input value={emoji} onChange={(event) => setEmoji(event.target.value.slice(0, 4))} maxLength={4} />
-                </label>
-                <div>
-                  {quickEmoji.map((item) => (
-                    <button type="button" key={item} onClick={() => setEmoji(item)}>{item}</button>
-                  ))}
-                </div>
-              </div>
+              <h2>Füge ein Bild hinzu</h2>
               {previewUrl ? (
                 <div className="image-preview">
                   <img src={previewUrl} alt="" />
@@ -420,13 +419,17 @@ export function BottomSheet({
               ) : null}
               <label className="file-picker">
                 <span>Foto wählen</span>
-                <small>{imageFile ? imageFile.name : "Wird vor Upload auf AVIF oder WebP komprimiert."}</small>
+                <small>{imageFile ? imageFile.name : "Pflichtfeld. Wird vor Upload auf AVIF oder WebP komprimiert."}</small>
                 <input
                   type="file"
                   accept="image/png,image/jpeg,image/webp,image/avif"
-                  onChange={(event) => setImageFile(event.target.files?.[0])}
+                  onChange={(event) => {
+                    setImageFile(event.target.files?.[0]);
+                    setImageError("");
+                  }}
                 />
               </label>
+              {imageError ? <p className="field-error">{imageError}</p> : null}
             </section>
           ) : null}
 
@@ -434,7 +437,7 @@ export function BottomSheet({
             <section className="wizard-step">
               <h2>Vorschau</h2>
               <article className="movement-card preview-card">
-                {previewUrl ? <img className="reel-image" src={previewUrl} alt="" /> : <span className="movement-emoji">{emoji}</span>}
+                {previewUrl ? <img className="reel-image" src={previewUrl} alt="" /> : null}
                 <h3>{title || "Dein Titel"}</h3>
                 <p>{selectedGroup?.name} · {typeLabels.find((item) => item.id === type)?.label || "Typ"} · Eingereicht</p>
                 <div className="movement-meta">
@@ -452,7 +455,7 @@ export function BottomSheet({
               Weiter
             </button>
           ) : (
-            <button className="primary-button" type="button" onClick={submitMovement} disabled={submitting || !selectedGroup || !type || !title.trim() || !description.trim()}>
+            <button className="primary-button" type="button" onClick={submitMovement} disabled={submitting || !selectedGroup || !type || !title.trim() || !description.trim() || !imageFile}>
               {submitting ? "Wird gespeichert..." : "Bewegung starten"}
             </button>
           )}

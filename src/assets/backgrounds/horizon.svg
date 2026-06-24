@@ -7,8 +7,8 @@
     </linearGradient>
     <radialGradient id="star" cx="52%" cy="30%" r="45%">
       <stop offset="0" stop-color="#fff7b8" stop-opacity=".95"/>
-      <stop offset=".18" stop-color="#ff7a1a" stop-opacity=".62"/>
-      <stop offset=".52" stop-color="#7c3aed" stop-opacity=".24"/>
+      <stop offset=".18" stop-color="#ffcc00" stop-opacity=".62"/>
+      <stop offset=".52" stop-color="#ffcc00" stop-opacity=".24"/>
       <stop offset="1" stop-color="#08111f" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">

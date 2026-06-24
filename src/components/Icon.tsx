@@ -5,7 +5,9 @@ type IconProps = {
     | "home"
     | "activity"
     | "plus"
+    | "plusSquare"
     | "chart"
+    | "grid"
     | "profile"
     | "search"
     | "chevron"
@@ -13,8 +15,13 @@ type IconProps = {
     | "arrowUpRight"
     | "checkCircle"
     | "list"
+    | "reels"
     | "x"
     | "share"
+    | "star"
+    | "message"
+    | "more"
+    | "camera"
     | "flag"
     | "spark"
     | "groups"
@@ -61,6 +68,13 @@ export function Icon({ name, size = 22 }: IconProps) {
         <path d="M5 12h14" />
       </>
     ),
+    plusSquare: (
+      <>
+        <rect x="5" y="5" width="14" height="14" rx="3.2" />
+        <path d="M12 8.5v7" />
+        <path d="M8.5 12h7" />
+      </>
+    ),
     chart: (
       <>
         <path d="M4 19V5" />
@@ -68,6 +82,14 @@ export function Icon({ name, size = 22 }: IconProps) {
         <path d="M8 15v-4" />
         <path d="M12 15V8" />
         <path d="M16 15v-8" />
+      </>
+    ),
+    grid: (
+      <>
+        <rect x="4" y="4" width="6" height="6" rx="1.4" />
+        <rect x="14" y="4" width="6" height="6" rx="1.4" />
+        <rect x="4" y="14" width="6" height="6" rx="1.4" />
+        <rect x="14" y="14" width="6" height="6" rx="1.4" />
       </>
     ),
     profile: (
@@ -106,6 +128,15 @@ export function Icon({ name, size = 22 }: IconProps) {
         <path d="M4 18h.01" />
       </>
     ),
+    reels: (
+      <>
+        <rect x="5" y="5" width="14" height="14" rx="3.2" />
+        <path d="M8 5 10.4 9" />
+        <path d="M13 5 15.4 9" />
+        <path d="M5 9h14" />
+        <path d="m11 12 3.8 2.4L11 16.8Z" />
+      </>
+    ),
     x: (
       <>
         <path d="M18 6 6 18" />
@@ -117,6 +148,29 @@ export function Icon({ name, size = 22 }: IconProps) {
         <path d="M12 16V4" />
         <path d="m7 9 5-5 5 5" />
         <path d="M5 14v5h14v-5" />
+      </>
+    ),
+    star: (
+      <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z" />
+    ),
+    message: (
+      <>
+        <path d="M21 12a8.5 8.5 0 0 1-8.5 8.5 9.4 9.4 0 0 1-3.8-.8L3 21l1.3-5.1a8.4 8.4 0 0 1-.8-3.9 8.5 8.5 0 0 1 17 0Z" />
+        <path d="M8 11.5h8" />
+        <path d="M8 15h5" />
+      </>
+    ),
+    more: (
+      <>
+        <circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none" />
+        <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+        <circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none" />
+      </>
+    ),
+    camera: (
+      <>
+        <path d="M4 8h3l1.5-2h7L17 8h3v11H4z" />
+        <circle cx="12" cy="13.5" r="3.5" />
       </>
     ),
     flag: (

@@ -1,5 +1,6 @@
-import { useMemo, useState, type CSSProperties, type FormEvent } from "react";
-import type { Movement, MovementType, UpdateMovementInput, UserStats } from "../types";
+import { useMemo, useState, type CSSProperties } from "react";
+import type { Group, Movement, UserStats } from "../types";
+import { Icon } from "../components/Icon";
 import { SectionHeader } from "../components/SectionHeader";
 import { StatCard } from "../components/StatCard";
 
@@ -7,132 +8,211 @@ type InsightsProps = {
   stats: UserStats;
   isAuthenticated: boolean;
   movements: Movement[];
+  groups: Group[];
   userId: string | null;
   onAuth: () => void;
   onOpenMovement: (movement: Movement) => void;
-  onToggleSupport: (id: string) => Promise<void> | void;
-  onUpdateMovement: (input: UpdateMovementInput) => Promise<void> | void;
-  onDeleteMovement: (id: string) => Promise<void> | void;
 };
 
-const typeOptions: Array<{ value: MovementType; label: string }> = [
-  { value: "problem", label: "Problem" },
-  { value: "idea", label: "Idee" },
-  { value: "improvement", label: "Verbesserung" },
-  { value: "question", label: "Frage" },
+type PostsView = "mine" | "groups" | "stats";
+
+const viewOptions: Array<{ id: PostsView; label: string; hint: string }> = [
+  { id: "mine", label: "Meine Posts", hint: "Alles, was du erstellt hast" },
+  { id: "groups", label: "Gruppenposts", hint: "Beiträge aus deinen Gruppen" },
+  { id: "stats", label: "Statistiken", hint: "Deine Wirkung in Zahlen" },
 ];
 
-function formatDate(value?: string) {
-  if (!value) return "Heute";
-  return new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "short", year: "numeric" }).format(
-    new Date(value),
-  );
+function tileLabel(movement: Movement) {
+  return movement.title || movement.groupName || "Beitrag";
 }
 
 export function Insights({
   stats,
   isAuthenticated,
   movements,
+  groups,
   userId,
   onAuth,
   onOpenMovement,
-  onToggleSupport,
-  onUpdateMovement,
-  onDeleteMovement,
 }: InsightsProps) {
-  const [editing, setEditing] = useState<Movement | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editDescription, setEditDescription] = useState("");
-  const [editCategory, setEditCategory] = useState("");
-  const [editEmoji, setEditEmoji] = useState("");
-  const [editType, setEditType] = useState<MovementType>("idea");
-  const [editImageFile, setEditImageFile] = useState<File | undefined>();
-  const [removeImage, setRemoveImage] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [view, setView] = useState<PostsView>("mine");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | undefined>();
 
-  const max = Math.max(...stats.weeklyReach, 1);
-  const progress = Math.min(92, Math.max(18, stats.supportedTopics * 9 + stats.ownMovements * 12));
   const ownMovements = useMemo(
     () => movements.filter((movement) => movement.userId === userId),
     [movements, userId],
   );
-  const supportedMovements = useMemo(
-    () => movements.filter((movement) => movement.supportedByUser),
-    [movements],
+  const groupMovements = useMemo(
+    () => movements.filter((movement) => movement.groupId === selectedGroupId),
+    [movements, selectedGroupId],
   );
-
-  function openEdit(movement: Movement) {
-    setEditing(movement);
-    setEditTitle(movement.title);
-    setEditDescription(movement.description);
-    setEditCategory(movement.category);
-    setEditEmoji(movement.emoji);
-    setEditType(movement.type);
-    setEditImageFile(undefined);
-    setRemoveImage(false);
-  }
-
-  async function submitEdit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!editing) return;
-    setBusy(true);
-    try {
-      await onUpdateMovement({
-        id: editing.id,
-        title: editTitle.trim(),
-        description: editDescription.trim(),
-        category: editCategory.trim(),
-        type: editType,
-        emoji: editEmoji.trim() || editing.emoji,
-        imageFile: editImageFile,
-        removeImage,
-      });
-      setEditing(null);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deleteOwnMovement(movement: Movement) {
-    if (!window.confirm("Beitrag wirklich löschen?\nDiese Bewegung und ihre Unterstützungen werden gelöscht.")) return;
-    setBusy(true);
-    try {
-      await onDeleteMovement(movement.id);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const selectedGroup = groups.find((group) => group.id === selectedGroupId);
+  const activeOption = viewOptions.find((option) => option.id === view) ?? viewOptions[0];
 
   if (!isAuthenticated) {
     return (
-      <div className="screen stack">
-        <header>
-          <span className="eyebrow">Persoenlicher Einfluss</span>
-          <h1>Dein Einfluss beginnt hier.</h1>
-        </header>
-        <section className="insight-hero guest-insight">
-          <div className="progress-ring" style={{ "--progress": "24%" } as CSSProperties}>
-            <span>0</span>
-          </div>
+      <div className="screen posts-screen">
+        <header className="posts-header">
           <div>
-            <strong>Ein Konto speichert deine Wirkung.</strong>
-            <p>Unterstützte Bewegungen, eigene Themen und aktive Gruppen werden dann dauerhaft verbunden.</p>
+            <span className="eyebrow">Posts</span>
+            <h1>Deine Beiträge</h1>
           </div>
-        </section>
-        <button className="primary-button" type="button" onClick={onAuth}>
-          Einfluss speichern
-        </button>
+        </header>
+        <div className="posts-empty-state">
+          <Icon name="grid" size={34} />
+          <strong>Melde dich an, um deine Beiträge zu sehen.</strong>
+          <button className="primary-button" type="button" onClick={onAuth}>
+            Anmelden
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="screen stack">
-      <header>
-        <span className="eyebrow">Persoenlicher Einfluss</span>
-        <h1>Dein Einfluss</h1>
+    <div className="screen posts-screen">
+      <header className="posts-header">
+        <div className="posts-menu-wrap">
+          <button
+            className="posts-title-button"
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-expanded={menuOpen}
+          >
+            <span>{activeOption.label}</span>
+            <Icon name="chevron" size={18} />
+          </button>
+          {menuOpen ? (
+            <div className="posts-menu">
+              {viewOptions.map((option) => (
+                <button
+                  type="button"
+                  key={option.id}
+                  className={view === option.id ? "active" : ""}
+                  onClick={() => {
+                    setView(option.id);
+                    setMenuOpen(false);
+                    if (option.id !== "groups") setSelectedGroupId(undefined);
+                  }}
+                >
+                  <span>
+                    <strong>{option.label}</strong>
+                    <small>{option.hint}</small>
+                  </span>
+                  {view === option.id ? <Icon name="checkCircle" size={18} /> : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </header>
 
+      <section className="posts-hero-card">
+        <div>
+          <span>Dein Raster</span>
+          <strong>{ownMovements.length} eigene Posts</strong>
+          <small>{stats.reached.toLocaleString("de-DE")} Impact · {stats.supportedTopics} unterstützt</small>
+        </div>
+        <button type="button" onClick={() => setView("stats")}>
+          Statistiken
+        </button>
+      </section>
+
+      {view === "mine" ? (
+        <PostGrid
+          movements={ownMovements}
+          emptyTitle="Noch keine eigenen Posts."
+          emptyText="Sobald du etwas postest, erscheint es hier in deinem Raster."
+          onOpenMovement={onOpenMovement}
+        />
+      ) : null}
+
+      {view === "groups" ? (
+        selectedGroupId ? (
+          <section className="group-posts-view">
+            <button className="posts-back-row" type="button" onClick={() => setSelectedGroupId(undefined)}>
+              <Icon name="chevronRight" size={18} />
+              Gruppen
+            </button>
+            <SectionHeader title={selectedGroup?.name ?? "Gruppenposts"} />
+            <PostGrid
+              movements={groupMovements}
+              emptyTitle="Noch keine Posts in dieser Gruppe."
+              emptyText="Wenn in der Gruppe Beiträge entstehen, tauchen sie hier auf."
+              onOpenMovement={onOpenMovement}
+            />
+          </section>
+        ) : (
+          <section className="group-picker-view">
+            <SectionHeader title="Deine Gruppen" />
+            {groups.length ? (
+              <div className="posts-group-grid">
+                {groups.map((group) => (
+                  <button className="posts-group-card" type="button" key={group.id} onClick={() => setSelectedGroupId(group.id)}>
+                    <span>{group.logoUrl ? <img src={group.logoUrl} alt="" /> : group.name.slice(0, 1).toUpperCase()}</span>
+                    <strong>{group.name}</strong>
+                    <small>{group.category}</small>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="posts-empty-state compact">
+                <Icon name="groups" size={32} />
+                <strong>Noch keine Gruppen.</strong>
+                <span>Gruppen, denen du folgst, erscheinen hier.</span>
+              </div>
+            )}
+          </section>
+        )
+      ) : null}
+
+      {view === "stats" ? (
+        <StatsView stats={stats} />
+      ) : null}
+    </div>
+  );
+}
+
+function PostGrid({
+  movements,
+  emptyTitle,
+  emptyText,
+  onOpenMovement,
+}: {
+  movements: Movement[];
+  emptyTitle: string;
+  emptyText: string;
+  onOpenMovement: (movement: Movement) => void;
+}) {
+  if (!movements.length) {
+    return (
+      <div className="posts-empty-state">
+        <Icon name="grid" size={38} />
+        <strong>{emptyTitle}</strong>
+        <span>{emptyText}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="posts-grid" aria-label="Beiträge">
+      {movements.map((movement) => (
+        <button className="post-tile" type="button" key={movement.id} onClick={() => onOpenMovement(movement)}>
+          {movement.imageUrl ? <img src={movement.imageUrl} alt="" /> : <span>{movement.emoji}</span>}
+          <small>{tileLabel(movement)}</small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function StatsView({ stats }: { stats: UserStats }) {
+  const max = Math.max(...stats.weeklyReach, 1);
+  const progress = Math.min(92, Math.max(18, stats.supportedTopics * 9 + stats.ownMovements * 12));
+
+  return (
+    <div className="posts-stats-view">
       <section className="insight-hero">
         <div className="progress-ring" style={{ "--progress": `${progress}%` } as CSSProperties}>
           <span>{stats.reached.toLocaleString("de-DE")}</span>
@@ -144,7 +224,7 @@ export function Insights({
       </section>
 
       <section>
-        <SectionHeader title="Ueberblick" />
+        <SectionHeader title="Überblick" />
         <div className="stats-grid">
           <StatCard label="Themen unterstützt" value={String(stats.supportedTopics)} tone="green" />
           <StatCard label="Eigene Themen" value={String(stats.ownMovements)} />
@@ -164,146 +244,6 @@ export function Insights({
             />
           ))}
         </div>
-      </section>
-
-      <section className="activity-section">
-        <SectionHeader title="Meine Beiträge" />
-        {ownMovements.length ? (
-          <div className="activity-list">
-            {ownMovements.map((movement) => (
-              <article className="activity-card" key={movement.id}>
-                <div className="activity-main">
-                  <span className="movement-emoji">{movement.emoji}</span>
-                  <div>
-                    <strong>{movement.title}</strong>
-                    <small>
-                      {movement.groupName} · {movement.status} · {formatDate(movement.createdAt)}
-                    </small>
-                  </div>
-                </div>
-                <div className="activity-meta">
-                  <span>{movement.supporters} Unterstützer</span>
-                  <span>+{movement.weeklyGrowth} diese Woche</span>
-                </div>
-                <div className="activity-actions">
-                  <button type="button" onClick={() => onOpenMovement(movement)}>
-                    Details
-                  </button>
-                  <button type="button" onClick={() => openEdit(movement)}>
-                    Bearbeiten
-                  </button>
-                  <button type="button" onClick={() => deleteOwnMovement(movement)} disabled={busy}>
-                    Löschen
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state">
-            <strong>Noch keine eigenen Beiträge.</strong>
-            <span>Starte über den Plus-Button deine erste Bewegung.</span>
-          </div>
-        )}
-      </section>
-
-      {editing ? (
-        <section className="edit-panel">
-          <div className="section-header">
-            <h2>Beitrag bearbeiten</h2>
-            <button className="text-button" type="button" onClick={() => setEditing(null)}>
-              Schließen
-            </button>
-          </div>
-          <form className="admin-form" onSubmit={submitEdit}>
-            <label>
-              Titel
-              <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} maxLength={90} required />
-            </label>
-            <label>
-              Beschreibung
-              <textarea
-                value={editDescription}
-                onChange={(event) => setEditDescription(event.target.value)}
-                maxLength={800}
-                rows={5}
-                required
-              />
-            </label>
-            <label>
-              Kategorie
-              <input value={editCategory} onChange={(event) => setEditCategory(event.target.value)} maxLength={40} />
-            </label>
-            <label>
-              Typ
-              <select value={editType} onChange={(event) => setEditType(event.target.value as MovementType)}>
-                {typeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Emoji
-              <input value={editEmoji} onChange={(event) => setEditEmoji(event.target.value.slice(0, 4))} maxLength={4} />
-            </label>
-            <label className="file-picker">
-              <span>Bild ersetzen</span>
-              <small>{editImageFile ? editImageFile.name : "Neues Foto optional auswählen."}</small>
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/avif"
-                onChange={(event) => setEditImageFile(event.target.files?.[0])}
-              />
-            </label>
-            {editing.imageUrl ? (
-              <button className="secondary-button full" type="button" onClick={() => setRemoveImage((value) => !value)}>
-                {removeImage ? "Bild bleibt doch erhalten" : "Vorhandenes Bild entfernen"}
-              </button>
-            ) : null}
-            <button className="primary-button" type="submit" disabled={busy || !editTitle.trim() || !editDescription.trim()}>
-              {busy ? "Speichern..." : "Änderungen speichern"}
-            </button>
-          </form>
-        </section>
-      ) : null}
-
-      <section className="activity-section">
-        <SectionHeader title="Unterstützte Themen" />
-        {supportedMovements.length ? (
-          <div className="activity-list">
-            {supportedMovements.map((movement) => (
-              <article className="activity-card" key={movement.id}>
-                <div className="activity-main">
-                  <span className="movement-emoji">{movement.emoji}</span>
-                  <div>
-                    <strong>{movement.title}</strong>
-                    <small>{movement.groupName} · {movement.category}</small>
-                  </div>
-                </div>
-                <div className="activity-actions">
-                  <button type="button" onClick={() => onOpenMovement(movement)}>
-                    Details
-                  </button>
-                  <button type="button" onClick={() => onToggleSupport(movement.id)}>
-                    Support entfernen
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state">
-            <strong>Noch nichts unterstützt.</strong>
-            <span>Im Feed kannst du Bewegungen mit einem Tipp sichtbar machen.</span>
-          </div>
-        )}
-      </section>
-
-      <section className="soft-note">
-        <strong>Beiträge sollten sachlich, konkret und lösungsorientiert sein.</strong>
-        <span>So bleibt Citrus ein Ort, an dem Bewegung entstehen kann.</span>
       </section>
     </div>
   );

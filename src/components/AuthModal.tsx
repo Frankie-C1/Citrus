@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthProvider";
-import { BrushStroke } from "./BrushStroke";
+import cityLoginImage from "../assets/onboarding/city-login.png";
 import { Icon } from "./Icon";
+import { StarburstLogo } from "./StarburstLogo";
 
 type AuthModalProps = {
   open: boolean;
@@ -51,17 +52,20 @@ export function AuthModal({ open, onClose, onSuccess }: AuthModalProps) {
   }
 
   return (
-    <div className="auth-backdrop" role="presentation">
-      <section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+    <div className="auth-backdrop auth-cinematic-backdrop" role="presentation">
+      <img className="auth-cinematic-image" src={cityLoginImage} alt="" />
+      <div className="auth-cinematic-overlay" />
+      <section className="auth-modal auth-cinematic-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
         <button className="icon-button auth-close" type="button" onClick={onClose} aria-label="Schließen">
           <Icon name="x" size={19} />
         </button>
         <div className="auth-copy">
-          <span className="eyebrow">Citrus</span>
-          <h2 id="auth-title">Speichere deinen Beitrag</h2>
-          <p>Erstelle kurz ein Konto, damit dein Einfluss und deine Themen dauerhaft mit dir verbunden bleiben.</p>
-          <strong>Revolution entsteht genau hier</strong>
-          <BrushStroke />
+          <div className="auth-cinematic-brand">
+            <StarburstLogo size={34} />
+            <span>Citrus</span>
+          </div>
+          <h2 id="auth-title">E Pluribus Unum.</h2>
+          <p>Aus vielen Stimmen wird eine Richtung.</p>
         </div>
 
         <form className="auth-form" onSubmit={submit}>

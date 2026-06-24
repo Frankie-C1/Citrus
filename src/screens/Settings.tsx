@@ -12,6 +12,7 @@ import {
   saveUserInterests,
   saveUserSettings,
   updateProfileSettings,
+  uploadProfileAvatar,
 } from "../data/queries";
 import type {
   FeedPreferences,
@@ -118,6 +119,26 @@ function applyTheme(theme: ThemePreference) {
   localStorage.setItem("citrus:theme", theme);
 }
 
+async function compressAvatar(file: File): Promise<{ blob: Blob; extension: "avif" | "webp" }> {
+  if (!file.type.startsWith("image/")) throw new Error("Bitte wähle eine Bilddatei.");
+  const bitmap = await createImageBitmap(file);
+  const maxSize = 320;
+  const scale = Math.min(1, maxSize / bitmap.width, maxSize / bitmap.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Profilfoto konnte nicht verarbeitet werden.");
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const toBlob = (type: string, quality: number) =>
+    new Promise<Blob | null>((resolve) => canvas.toBlob((blob) => resolve(blob), type, quality));
+  const avif = await toBlob("image/avif", 0.42);
+  if (avif) return { blob: avif, extension: "avif" };
+  const webp = await toBlob("image/webp", 0.62);
+  if (webp) return { blob: webp, extension: "webp" };
+  throw new Error("Dieser Browser kann das Profilfoto nicht komprimieren.");
+}
+
 function settingTitle(pane: SettingsPane) {
   const titles: Record<SettingsPane, string> = {
     main: "Einstellungen",
@@ -169,6 +190,8 @@ export function SettingsScreen({
   const [moderation, setModeration] = useState<ModerationSummary>({ blockedUsers: [], reportedContents: [], ownReports: [] });
   const [username, setUsername] = useState(profile?.username ?? user.username ?? "");
   const [displayName, setDisplayName] = useState(profile?.displayName ?? user.name);
+  const [avatarFile, setAvatarFile] = useState<File | undefined>();
+  const [avatarPreview, setAvatarPreview] = useState("");
   const [email, setEmail] = useState(user.email ?? "");
   const [password, setPassword] = useState("");
   const [inviteCode, setInviteCode] = useState("");
@@ -195,6 +218,16 @@ export function SettingsScreen({
     ]);
     return groups.filter((group) => ids.has(group.id));
   }, [groups, memberships, movements, user.id]);
+
+  useEffect(() => {
+    if (!avatarFile) {
+      setAvatarPreview("");
+      return;
+    }
+    const url = URL.createObjectURL(avatarFile);
+    setAvatarPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [avatarFile]);
 
   useEffect(() => {
     if (!authUser) return;
@@ -308,7 +341,13 @@ export function SettingsScreen({
     if (!profile) return;
     setBusy(true);
     try {
-      await updateProfileSettings({ id: profile.id, username, displayName });
+      let avatarUrl: string | undefined;
+      if (avatarFile) {
+        const compressed = await compressAvatar(avatarFile);
+        avatarUrl = await uploadProfileAvatar(profile.id, compressed.blob, compressed.extension);
+      }
+      await updateProfileSettings({ id: profile.id, username, displayName, avatarUrl });
+      setAvatarFile(undefined);
       await onRefresh();
       onToast("Profil gespeichert.");
       setPane("main");
@@ -479,6 +518,22 @@ export function SettingsScreen({
       {pane === "editProfile" || pane === "username" ? (
         <SettingsCard>
           <form className="settings-form" onSubmit={saveProfile}>
+            <label className="settings-avatar-upload">
+              <span>Profilfoto</span>
+              <div>
+                {avatarPreview || profile?.avatarUrl ? (
+                  <img src={avatarPreview || profile?.avatarUrl || ""} alt="" />
+                ) : (
+                  <strong>{initialsFrom(displayName || username || "Citrus")}</strong>
+                )}
+                <small>{avatarFile ? avatarFile.name : "Kleines Foto auswählen"}</small>
+              </div>
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/avif"
+                onChange={(event) => setAvatarFile(event.target.files?.[0])}
+              />
+            </label>
             <label>
               Anzeigename
               <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required />

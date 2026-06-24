@@ -83,6 +83,15 @@ export type Movement = {
   userSupportCreatedAt?: string;
   userId?: string | null;
   authorUsername?: string | null;
+  authorDisplayName?: string | null;
+  authorAvatarUrl?: string | null;
+  authorRole?: UserRole | null;
+  commentCount?: number;
+  supporterPreviews?: Array<{
+    id: string;
+    name: string;
+    avatarUrl?: string | null;
+  }>;
   reportCount?: number;
   createdAt?: string;
   recentSupporters?: number;
