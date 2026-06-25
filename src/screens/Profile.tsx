@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type FormEvent, type PointerEvent } from "react";
 import { useAuth } from "../auth/AuthProvider";
-import { createGroup, deleteMovement, requestAccountDeletion, searchUsers, updateProfileSettings } from "../data/queries";
+import { anonymizeUserProfile, createGroup, deleteMovement, deleteUserMovements, requestAccountDeletion, searchUsers, updateProfileSettings } from "../data/queries";
 import type { AdminUserResult, Group, GroupMembership, Movement, Scope, User, UserStats } from "../types";
 import { GroupVisual } from "../components/GroupVisual";
 import { Icon } from "../components/Icon";
@@ -22,7 +22,7 @@ type ProfileProps = {
   onPlus: () => void;
   onToast: (message: string) => void;
   onAuth: () => void;
-  onLogout: () => void;
+  onAbmelden: () => void;
   onRefresh: () => Promise<void>;
 };
 
@@ -124,7 +124,7 @@ export function Profile({
   onPlus,
   onToast,
   onAuth,
-  onLogout,
+  onAbmelden,
   onRefresh,
 }: ProfileProps) {
   const { profile, updateEmail, updatePassword } = useAuth();
@@ -319,6 +319,24 @@ export function Profile({
     }
   }
 
+
+  async function removeUser(item: AdminUserResult, deletePosts: boolean) {
+    const label = deletePosts ? "Nutzer anonymisieren und alle Beitraege loeschen?" : "Nutzer anonymisieren und Beitraege behalten?";
+    if (!window.confirm(label)) return;
+    setBusy(true);
+    try {
+      if (deletePosts) await deleteUserMovements(item.id);
+      await anonymizeUserProfile(item.id);
+      setUserResults((current) => current.filter((userResult) => userResult.id !== item.id));
+      await onRefresh();
+      onToast(deletePosts ? "Nutzer anonymisiert und Beitraege geloescht." : "Nutzer anonymisiert.");
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Nutzer konnte nicht geloescht werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submitInviteCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (inviteCode.length !== 5) {
@@ -397,7 +415,7 @@ export function Profile({
           onLeaveGroup={onLeaveGroup}
           onReset={onReset}
           onToast={onToast}
-          onLogout={onLogout}
+          onAbmelden={onAbmelden}
           onRefresh={onRefresh}
         />
       );
@@ -483,10 +501,10 @@ export function Profile({
                 </span>
                 <Icon name="chevronRight" size={18} />
               </button>
-              <button type="button" onClick={onLogout}>
+              <button type="button" onClick={onAbmelden}>
                 <Icon name="profile" size={20} />
                 <span>
-                  <strong>Logout</strong>
+                  <strong>Abmelden</strong>
                   <small>Aktuelle Sitzung beenden</small>
                 </span>
                 <Icon name="chevronRight" size={18} />
@@ -572,7 +590,7 @@ export function Profile({
                       {userResults.map((item) => (
                         <article key={item.id}>
                           <span>
-                            <strong>{item.username}</strong>
+                            <strong>{item.displayName || item.username || "Nutzer"}</strong>
                             <small>{item.email} · {item.role}</small>
                           </span>
                         </article>
@@ -742,8 +760,8 @@ export function Profile({
             <button className="secondary-button full" type="button" onClick={onOpenGroups}>
               Gruppen verwalten
             </button>
-            <button className="secondary-button full" type="button" onClick={onLogout}>
-              Logout
+            <button className="secondary-button full" type="button" onClick={onAbmelden}>
+              Abmelden
             </button>
             <button className="reset-button" type="button" onClick={onReset}>
               Lokales Onboarding zurücksetzen
@@ -907,9 +925,13 @@ export function Profile({
                     {userResults.map((item) => (
                       <article key={item.id}>
                         <span>
-                          <strong>{item.username}</strong>
+                          <strong>{item.displayName || item.username || "Nutzer"}</strong>
                           <small>{item.email} · {item.role}</small>
                         </span>
+                        <div className="admin-result-actions">
+                          <button type="button" onClick={() => removeUser(item, false)} disabled={busy}>Anonymisieren</button>
+                          <button type="button" onClick={() => removeUser(item, true)} disabled={busy}>Nutzer + Beitraege loeschen</button>
+                        </div>
                       </article>
                     ))}
                   </div>
@@ -1075,8 +1097,8 @@ export function Profile({
               Einstellungen speichern
             </button>
           </form>
-          <button className="secondary-button full" type="button" onClick={onLogout}>
-            Logout
+          <button className="secondary-button full" type="button" onClick={onAbmelden}>
+            Abmelden
           </button>
           <button className="reset-button" type="button" onClick={requestDeletion} disabled={busy}>
             Account-Löschung vormerken
@@ -1149,7 +1171,7 @@ export function Profile({
                   {userResults.map((item) => (
                     <article key={item.id}>
                       <span>
-                        <strong>{item.username}</strong>
+                        <strong>{item.displayName || item.username || "Nutzer"}</strong>
                         <small>{item.email} · {item.role}</small>
                       </span>
                     </article>

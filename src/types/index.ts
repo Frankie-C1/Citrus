@@ -8,6 +8,7 @@ export type MovementStatus =
   | "done";
 
 export type MovementType = "problem" | "idea" | "improvement" | "question";
+export type BackgroundType = "image" | "color" | "gradient" | "emoji";
 
 export type UserRole = "user" | "admin";
 
@@ -69,6 +70,8 @@ export type Movement = {
   description: string;
   emoji: string;
   imageUrl?: string | null;
+  backgroundType?: BackgroundType | null;
+  backgroundValue?: string | null;
   groupId: string;
   groupName: string;
   groupIcon?: string | null;
@@ -86,6 +89,7 @@ export type Movement = {
   authorDisplayName?: string | null;
   authorAvatarUrl?: string | null;
   authorRole?: UserRole | null;
+  isAnonymous?: boolean;
   commentCount?: number;
   supporterPreviews?: Array<{
     id: string;
@@ -125,6 +129,9 @@ export type CreateMovementInput = {
   emoji?: string;
   imageUrl?: string;
   imageFile?: File;
+  backgroundType?: BackgroundType;
+  backgroundValue?: string;
+  isAnonymous?: boolean;
 };
 
 export type UpdateMovementInput = {
@@ -135,6 +142,8 @@ export type UpdateMovementInput = {
   type: MovementType;
   emoji?: string;
   imageUrl?: string | null;
+  backgroundType?: BackgroundType | null;
+  backgroundValue?: string | null;
   removeImage?: boolean;
   imageFile?: File;
 };

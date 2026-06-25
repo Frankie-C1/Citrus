@@ -41,7 +41,7 @@ type SettingsScreenProps = {
   onLeaveGroup: (membership: GroupMembership) => Promise<void> | void;
   onReset: () => void;
   onToast: (message: string) => void;
-  onLogout: () => void;
+  onAbmelden: () => void;
   onRefresh: () => Promise<void>;
 };
 
@@ -179,7 +179,7 @@ export function SettingsScreen({
   onLeaveGroup,
   onReset,
   onToast,
-  onLogout,
+  onAbmelden,
   onRefresh,
 }: SettingsScreenProps) {
   const { authUser, profile, updateEmail, updatePassword, signOutEverywhere } = useAuth();
@@ -410,7 +410,7 @@ export function SettingsScreen({
     try {
       await signOutEverywhere();
       onToast("Du wurdest auf allen Geräten abgemeldet.");
-      onLogout();
+      onAbmelden();
     } catch (error) {
       onToast(error instanceof Error ? error.message : "Abmelden auf allen Geräten ist fehlgeschlagen.");
     } finally {

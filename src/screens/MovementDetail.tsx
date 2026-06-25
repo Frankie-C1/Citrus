@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Movement } from "../types";
 import { Icon } from "../components/Icon";
 import { Timeline } from "../components/Timeline";
+import { displayAuthorName, movementImageUrl, movementVisualStyle, shouldHideAuthorIdentity } from "../lib/movementPresentation";
 
 type MovementDetailProps = {
   movement: Movement;
@@ -27,10 +28,6 @@ function relativeTime(value?: string) {
   return new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "long", year: "numeric" }).format(new Date(value));
 }
 
-function authorName(movement: Movement) {
-  return movement.authorDisplayName || movement.authorUsername || "Anonym";
-}
-
 function initials(name: string) {
   return (
     name
@@ -52,8 +49,11 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
   const [updateOpen, setUpdateOpen] = useState(false);
   const [updateText, setUpdateText] = useState("");
   const [busy, setBusy] = useState(false);
-  const name = authorName(movement);
-  const commentCount = movement.commentCount ?? movement.updates.length;
+  const name = displayAuthorName(movement);
+  const imageUrl = movementImageUrl(movement);
+  const hideAuthor = shouldHideAuthorIdentity(movement);
+  const updateSectionRef = useRef<HTMLElement>(null);
+  const updateTextRef = useRef<HTMLTextAreaElement>(null);
 
   async function submitUpdate() {
     if (!updateText.trim() || !onPostUpdate) return;
@@ -68,9 +68,18 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
     }
   }
 
+  function openUpdateForm() {
+    setUpdateOpen(true);
+    setMenuOpen(false);
+    window.setTimeout(() => {
+      updateSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      updateTextRef.current?.focus({ preventScroll: true });
+    }, 80);
+  }
+
   return (
-    <div className="detail-reel-screen">
-      {movement.imageUrl ? <img className="detail-reel-image" src={movement.imageUrl} alt="" /> : null}
+    <div className={`detail-reel-screen ${imageUrl ? "has-image" : "feed-slide-art"}`} style={movementVisualStyle(movement)}>
+      {imageUrl ? <img className="detail-reel-image" src={imageUrl} alt="" /> : <div className="feed-slide-emoji detail-emoji" aria-hidden="true">{movement.emoji || "*"}</div>}
       <div className="detail-reel-gradient" />
 
       <header className="detail-reel-topbar">
@@ -89,7 +98,7 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
           </button>
           {menuOpen ? (
             <div className="feed-more-menu detail-menu">
-              {canManage ? <button type="button" onClick={() => setUpdateOpen(true)}>Update posten</button> : null}
+              {canManage ? <button type="button" onClick={openUpdateForm}>Update posten</button> : null}
               {canManage ? (
                 <button
                   type="button"
@@ -118,10 +127,6 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
           <Icon name="star" size={29} />
           <span>{movement.supporters.toLocaleString("de-DE")}</span>
         </button>
-        <button className="feed-action-button" type="button" aria-label="Kommentare öffnen">
-          <Icon name="message" size={27} />
-          <span>{commentCount.toLocaleString("de-DE")}</span>
-        </button>
         <button className="feed-action-button" type="button" onClick={() => onShare(movement)} aria-label="Teilen">
           <Icon name="share" size={26} />
           <span>Teilen</span>
@@ -139,18 +144,18 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
 
         <div className="feed-author-row detail-author-row">
           <span className="feed-avatar">
-            {movement.authorAvatarUrl ? <img src={movement.authorAvatarUrl} alt="" /> : initials(name)}
+            {!hideAuthor && movement.authorAvatarUrl ? <img src={movement.authorAvatarUrl} alt="" /> : initials(name)}
           </span>
           <span>
             <strong>
               {name}
-              {movement.authorRole === "admin" ? <small className="verified-badge">✓</small> : null}
+              {!hideAuthor && movement.authorRole === "admin" ? <small className="verified-badge">Admin</small> : null}
             </strong>
             <small>{movement.groupName} · {relativeTime(movement.createdAt)}</small>
           </span>
         </div>
 
-        <div className="detail-meta-grid">
+        <div className="detail-meta-grid two">
           <span>
             <strong>{movement.supporters.toLocaleString("de-DE")}</strong>
             <small>Unterstützer</small>
@@ -159,10 +164,6 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
             <strong>{statusLabels[movement.status]}</strong>
             <small>Status</small>
           </span>
-          <span>
-            <strong>{commentCount.toLocaleString("de-DE")}</strong>
-            <small>Kommentare</small>
-          </span>
         </div>
 
         <section className="detail-glass-block">
@@ -170,11 +171,12 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
           <Timeline status={movement.status} />
         </section>
 
-        <section className="detail-glass-block">
-          <h2>Updates & Diskussion</h2>
+        <section className="detail-glass-block" ref={updateSectionRef}>
+          <h2>Updates</h2>
+          {canManage ? <button className="detail-update-jump" type="button" onClick={openUpdateForm}>Update posten</button> : null}
           {updateOpen ? (
             <div className="detail-update-form">
-              <textarea value={updateText} onChange={(event) => setUpdateText(event.target.value)} rows={4} maxLength={500} placeholder="Was gibt es Neues?" />
+              <textarea ref={updateTextRef} value={updateText} onChange={(event) => setUpdateText(event.target.value)} rows={4} maxLength={500} placeholder="Was gibt es Neues?" />
               <button type="button" onClick={submitUpdate} disabled={busy || !updateText.trim()}>
                 {busy ? "Postet..." : "Update posten"}
               </button>

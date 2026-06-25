@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Movement, Scope } from "../types";
 import { Icon } from "../components/Icon";
+import { displayAuthorName, movementImageUrl, movementVisualStyle, shouldHideAuthorIdentity } from "../lib/movementPresentation";
 
 type FeedProps = {
   movements: Movement[];
@@ -35,10 +36,6 @@ function relativeTime(value?: string) {
   const days = Math.round(hours / 24);
   if (days < 7) return `vor ${days} Tagen`;
   return new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "short" }).format(new Date(value));
-}
-
-function displayAuthor(movement: Movement) {
-  return movement.authorDisplayName || movement.authorUsername || "Anonym";
 }
 
 function initials(name: string) {
@@ -249,22 +246,28 @@ export function Feed({
           ) : movements.length ? (
             <>
             {movements.map((movement, index) => {
-            const authorName = displayAuthor(movement);
+            const authorName = displayAuthorName(movement);
+            const imageUrl = movementImageUrl(movement);
+            const hideAuthor = shouldHideAuthorIdentity(movement);
             const menuOpen = menuMovementId === movement.id;
 
             return (
-              <article className="feed-slide" key={movement.id}>
-                <img
-                  className="feed-slide-image"
-                  src={movement.imageUrl ?? ""}
-                  alt=""
-                  loading={index < 2 ? "eager" : "lazy"}
-                  decoding="async"
-                  onDoubleClick={() => likeFromImage(movement)}
-                  onPointerUp={(event) => {
-                    if (event.pointerType === "touch") handleImageTap(movement);
-                  }}
-                />
+              <article className={`feed-slide ${imageUrl ? "has-image" : "feed-slide-art"}`} key={movement.id} style={movementVisualStyle(movement)}>
+                {imageUrl ? (
+                  <img
+                    className="feed-slide-image"
+                    src={imageUrl}
+                    alt=""
+                    loading={index < 2 ? "eager" : "lazy"}
+                    decoding="async"
+                    onDoubleClick={() => likeFromImage(movement)}
+                    onPointerUp={(event) => {
+                      if (event.pointerType === "touch") handleImageTap(movement);
+                    }}
+                  />
+                ) : (
+                  <div className="feed-slide-emoji" aria-hidden="true">{movement.emoji || "*"}</div>
+                )}
                 <div className="feed-slide-gradient" />
 
                 <div className="feed-action-rail" aria-label="Beitragsaktionen">
@@ -331,12 +334,12 @@ export function Feed({
 
                   <div className="feed-author-row">
                     <span className="feed-avatar">
-                      {movement.authorAvatarUrl ? <img src={movement.authorAvatarUrl} alt="" /> : initials(authorName)}
+                      {!hideAuthor && movement.authorAvatarUrl ? <img src={movement.authorAvatarUrl} alt="" /> : initials(authorName)}
                     </span>
                     <span>
                       <strong>
                         {authorName}
-                        {movement.authorRole === "admin" ? <small className="verified-badge">✓</small> : null}
+                        {!hideAuthor && movement.authorRole === "admin" ? <small className="verified-badge">Admin</small> : null}
                       </strong>
                       <small>{movement.groupName} · {relativeTime(movement.createdAt)}</small>
                     </span>

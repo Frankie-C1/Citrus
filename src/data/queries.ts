@@ -1,6 +1,7 @@
 import { isSupabaseConfigured, supabase, getSupabaseConfigError } from "../lib/supabase";
 import type {
   AdminUserResult,
+  BackgroundType,
   CreateMovementInput,
   FeedbackInput,
   FeedPreferences,
@@ -45,6 +46,9 @@ type MovementRow = {
   scope: Scope;
   emoji: string | null;
   image_url: string | null;
+  background_type?: BackgroundType | null;
+  background_value?: string | null;
+  is_anonymous?: boolean | null;
   category: string | null;
   report_count: number | null;
   created_at: string | null;
@@ -316,7 +320,7 @@ export async function fetchMovements(userId?: string | null) {
 
   const { data: movementRows, error: movementError } = await supabase
     .from("movements")
-    .select("id,title,description,type,status,group_id,user_id,scope,emoji,image_url,category,report_count,created_at")
+    .select("id,title,description,type,status,group_id,user_id,scope,emoji,image_url,background_type,background_value,is_anonymous,category,report_count,created_at")
     .order("created_at", { ascending: false });
 
   if (movementError) {
@@ -337,7 +341,7 @@ export async function fetchMovements(userId?: string | null) {
       : Promise.resolve({ data: [], error: null }),
     supabase.from("supports").select("id,movement_id,user_id,created_at").in("movement_id", movementIds),
     supabase.from("movement_updates").select("id,movement_id,body,created_at").in("movement_id", movementIds),
-    authorIds.length && userId
+    authorIds.length
       ? supabase.from("profiles").select("id,email,username,display_name,avatar_url,role").in("id", authorIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
@@ -383,6 +387,7 @@ export async function fetchMovements(userId?: string | null) {
     const supports = supportsByMovement.get(movement.id) ?? [];
     const updates = updatesByMovement.get(movement.id) ?? [];
     const author = movement.user_id ? profilesById.get(movement.user_id) : undefined;
+    const isAnonymous = Boolean(movement.is_anonymous);
     const category = movement.category || group?.category || "Allgemein";
     const userSupport = userId ? supports.find((support) => support.user_id === userId) : undefined;
     const supporterPreviews = supports
@@ -411,6 +416,8 @@ export async function fetchMovements(userId?: string | null) {
       description: movement.description,
       emoji: movement.emoji || fallbackDisplayEmoji(movement.type, category),
       imageUrl: movement.image_url,
+      backgroundType: movement.background_type ?? (movement.image_url ? "image" : "emoji"),
+      backgroundValue: movement.background_value ?? movement.image_url ?? null,
       groupId: movement.group_id ?? "",
       groupName: group?.name ?? "Öffentlich",
       groupIcon: group?.icon,
@@ -433,10 +440,11 @@ export async function fetchMovements(userId?: string | null) {
       supportedByUser: Boolean(userSupport),
       userSupportCreatedAt: userSupport?.created_at ?? undefined,
       userId: movement.user_id,
-      authorUsername: author?.username,
-      authorDisplayName: author?.display_name,
-      authorAvatarUrl: author?.avatar_url,
-      authorRole: author?.role,
+      authorUsername: isAnonymous ? "Anonym" : author?.username,
+      authorDisplayName: isAnonymous ? "Anonym" : author?.display_name,
+      authorAvatarUrl: isAnonymous ? null : author?.avatar_url,
+      authorRole: isAnonymous ? null : author?.role,
+      isAnonymous,
       commentCount: updates.length,
       supporterPreviews,
       reportCount: movement.report_count ?? 0,
@@ -471,6 +479,9 @@ export async function createMovement(input: CreateMovementInput, userId: string)
       category: input.category,
       emoji: input.emoji || null,
       image_url: input.imageUrl || null,
+      background_type: input.backgroundType || (input.imageUrl ? "image" : "emoji"),
+      background_value: input.backgroundValue || input.imageUrl || null,
+      is_anonymous: Boolean(input.isAnonymous),
     })
     .select("id")
     .single();
@@ -976,6 +987,8 @@ export async function updateMovement(input: UpdateMovementInput, userId: string)
 
   if (input.removeImage) payload.image_url = null;
   if (typeof input.imageUrl !== "undefined") payload.image_url = input.imageUrl;
+  if (typeof input.backgroundType !== "undefined") payload.background_type = input.backgroundType;
+  if (typeof input.backgroundValue !== "undefined") payload.background_value = input.backgroundValue;
 
   const { error } = await supabase
     .from("movements")
@@ -1076,6 +1089,33 @@ export async function requestAccountDeletion(userId: string) {
     .eq("id", userId);
   if (error) {
     logSupabaseError("requestAccountDeletion failed", error);
+    throw error;
+  }
+}
+
+export async function anonymizeUserProfile(userId: string) {
+  requireSupabase();
+  const shortId = userId.replace(/-/g, "").slice(0, 8);
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      deleted_at: new Date().toISOString(),
+      username: `deleted_user_${shortId}`,
+      display_name: "Geloeschter Nutzer",
+      avatar_url: null,
+    })
+    .eq("id", userId);
+  if (error) {
+    logSupabaseError("anonymizeUserProfile failed", error);
+    throw error;
+  }
+}
+
+export async function deleteUserMovements(userId: string) {
+  requireSupabase();
+  const { error } = await supabase.from("movements").delete().eq("user_id", userId);
+  if (error) {
+    logSupabaseError("deleteUserMovements failed", error);
     throw error;
   }
 }

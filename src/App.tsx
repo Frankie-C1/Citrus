@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { useAuth } from "./auth/AuthProvider";
 import { AppShell } from "./components/AppShell";
 import { AuthModal } from "./components/AuthModal";
@@ -28,6 +28,7 @@ import {
   updateMovement,
   uploadMovementMedia,
 } from "./data/queries";
+import saxophoneImage from "./assets/onboarding/saxophone-onboarding.png";
 import { getSupabaseConfigError } from "./lib/supabase";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { Feed } from "./screens/Feed";
@@ -121,8 +122,22 @@ async function compressImage(file: File): Promise<{ blob: Blob; extension: "avif
   throw new Error("Dieser Browser kann das Bild nicht als AVIF oder WebP komprimieren.");
 }
 
+function LoadingScreen() {
+  return (
+    <div className="app-loading-screen">
+      <img src={saxophoneImage} alt="" />
+      <div className="app-loading-overlay" />
+      <div className="app-loading-brand">
+        <span>C</span>
+        <h1>Citrus</h1>
+        <p>Was zählt, wird sichtbar.</p>
+      </div>
+    </div>
+  );
+}
+
 function App() {
-  const { authUser, profile, signOut, refreshProfile } = useAuth();
+  const { authUser, profile, signOut, refreshProfile, loading: authLoading } = useAuth();
   const [onboarded, setOnboarded] = useState(() => localStorage.getItem(STORAGE_KEYS.onboarded) === "true");
   const [firstRunCompleted, setFirstRunCompleted] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>("home");
@@ -145,6 +160,8 @@ function App() {
   const [userSettings, setUserSettings] = useState<UserSettings>(defaultUserSettings);
   const [loadingData, setLoadingData] = useState(true);
   const [dataError, setDataError] = useState(getSupabaseConfigError());
+  const [splashReady, setSplashReady] = useState(false);
+  const edgeSwipeStart = useRef<{ x: number; y: number } | null>(null);
 
   const currentUserId = authUser?.id ?? null;
 
@@ -189,12 +206,31 @@ function App() {
   }, [loadData]);
 
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    if (sheetOpen || searchOpen) document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previousOverflow;
+    const timer = window.setTimeout(() => setSplashReady(true), 900);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!sheetOpen && !searchOpen && !authOpen && !reportTarget) return;
+    const scrollY = window.scrollY;
+    const previous = {
+      overflow: document.body.style.overflow,
+      position: document.body.style.position,
+      top: document.body.style.top,
+      width: document.body.style.width,
     };
-  }, [sheetOpen, searchOpen]);
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = "100%";
+    return () => {
+      document.body.style.overflow = previous.overflow;
+      document.body.style.position = previous.position;
+      document.body.style.top = previous.top;
+      document.body.style.width = previous.width;
+      window.scrollTo(0, scrollY);
+    };
+  }, [authOpen, reportTarget, searchOpen, sheetOpen]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -232,7 +268,7 @@ function App() {
     () =>
       movements.map((movement) =>
         userSettings.privacyVisibility === "anonymous" && movement.userId === currentUserId
-          ? { ...movement, authorUsername: "Anonym" }
+          ? { ...movement, authorUsername: "Anonym", authorDisplayName: "Anonym", authorAvatarUrl: null, authorRole: null, isAnonymous: true }
           : movement,
       ),
     [currentUserId, movements, userSettings.privacyVisibility],
@@ -271,7 +307,6 @@ function App() {
     const membershipGroupIds = new Set(memberships.map((membership) => membership.groupId));
     const deduped = [...new Map(visibleMovements.map((movement) => [movement.id, movement])).values()];
     const filtered = deduped
-      .filter((movement) => Boolean(movement.imageUrl))
       .filter((movement) => {
         if (scopeFilter === "internal") return membershipGroupIds.has(movement.groupId);
         if (scopeFilter === "external") {
@@ -328,7 +363,6 @@ function App() {
   }
 
   async function saveMovement(input: CreateMovementInput, userId: string) {
-    if (!input.imageFile) throw new Error("Bitte füge ein Bild hinzu.");
 
     let imageUrl = input.imageUrl;
     if (input.imageFile) {
@@ -336,7 +370,12 @@ function App() {
       imageUrl = await uploadMovementMedia(userId, compressed.blob, compressed.extension);
     }
 
-    const newMovementId = await createMovement({ ...input, imageUrl }, userId);
+    const newMovementId = await createMovement({
+      ...input,
+      imageUrl,
+      backgroundType: input.imageFile ? "image" : input.backgroundType,
+      backgroundValue: input.imageFile ? imageUrl : input.backgroundValue,
+    }, userId);
     await loadData();
     setScopeFilter("all");
     setSearch("");
@@ -575,7 +614,12 @@ function App() {
     }
   }
 
+  function pushInternalState(view: string) {
+    window.history.pushState({ citrus: view }, "", window.location.pathname);
+  }
+
   function openMovement(movement: Movement) {
+    pushInternalState("detail");
     setDetailMovementId(movement.id);
   }
 
@@ -588,6 +632,7 @@ function App() {
   }
 
   function changeTab(tab: Tab) {
+    if (tab !== activeTab) pushInternalState(`tab:${tab}`);
     setActiveTab(tab);
     setDetailMovementId(undefined);
     setGroupsViewOpen(false);
@@ -602,13 +647,13 @@ function App() {
     await loadData();
   }
 
-  async function handleLogout() {
+  async function handleAbmelden() {
     try {
       await signOut();
       await loadData();
-      showToast("Du bist ausgeloggt.");
+      showToast("Du wurdest abgemeldet.");
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Logout fehlgeschlagen.");
+      showToast(error instanceof Error ? error.message : "Abmelden fehlgeschlagen.");
     }
   }
 
@@ -626,6 +671,49 @@ function App() {
     setDetailMovementId(undefined);
     showToast("Lokales Onboarding wurde zurückgesetzt.");
   }
+
+  useEffect(() => {
+    window.history.replaceState({ citrus: "root" }, "", window.location.pathname);
+    function handlePopState() {
+      if (sheetOpen) { setSheetOpen(false); return; }
+      if (authOpen) { setAuthOpen(false); return; }
+      if (searchOpen) { setSearchOpen(false); return; }
+      if (reportTarget) { setReportTarget(undefined); return; }
+      if (detailMovementId) { setDetailMovementId(undefined); return; }
+      if (notificationsOpen) { setNotificationsOpen(false); return; }
+      if (groupsViewOpen) { setGroupsViewOpen(false); return; }
+      if (activeTab !== "home") { setActiveTab("home"); return; }
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [activeTab, authOpen, detailMovementId, groupsViewOpen, notificationsOpen, reportTarget, searchOpen, sheetOpen]);
+
+  function startEdgeSwipe(event: PointerEvent) {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (sheetOpen || target?.closest("input, textarea, select, button, a")) return;
+    if (event.clientX > 32) return;
+    edgeSwipeStart.current = { x: event.clientX, y: event.clientY };
+  }
+
+  function moveEdgeSwipe(event: PointerEvent) {
+    const start = edgeSwipeStart.current;
+    if (!start) return;
+    const deltaX = event.clientX - start.x;
+    const deltaY = Math.abs(event.clientY - start.y);
+    if (deltaX > 74 && deltaY < 58) {
+      edgeSwipeStart.current = null;
+      if (detailMovementId) setDetailMovementId(undefined);
+      else if (activeTab === "feed") setActiveTab("home");
+      else if (activeTab !== "home") setActiveTab("feed");
+    }
+  }
+
+  function endEdgeSwipe() {
+    edgeSwipeStart.current = null;
+  }
+
+  const showSplash = !splashReady || authLoading || (loadingData && !dataError);
+  if (showSplash) return <LoadingScreen />;
 
   if (!authUser) {
     return (
@@ -657,10 +745,10 @@ function App() {
       onOpenMovement={openMovement}
       onToggleSupport={handleToggleSupport}
       onOpenFeed={() => changeTab("feed")}
-      onOpenSearch={() => setSearchOpen(true)}
-      onOpenNotifications={() => setNotificationsOpen(true)}
-      onPlus={() => setSheetOpen(true)}
-      onAuth={() => setAuthOpen(true)}
+      onOpenSearch={() => { pushInternalState("search"); setSearchOpen(true); }}
+      onOpenNotifications={() => { pushInternalState("notifications"); setNotificationsOpen(true); }}
+      onPlus={() => { pushInternalState("sheet"); setSheetOpen(true); }}
+      onAuth={() => { pushInternalState("auth"); setAuthOpen(true); }}
     />
   );
 
@@ -695,7 +783,7 @@ function App() {
           openMovement(movement);
         }}
         onMarkAllRead={handleMarkNotificationsRead}
-        onAuth={() => setAuthOpen(true)}
+        onAuth={() => { pushInternalState("auth"); setAuthOpen(true); }}
       />
     );
   } else if (groupsViewOpen) {
@@ -716,7 +804,7 @@ function App() {
         onShare={shareMovement}
         onReport={reportMovement}
         onOpenGroup={openGroup}
-        onPlus={() => setSheetOpen(true)}
+        onPlus={() => { pushInternalState("sheet"); setSheetOpen(true); }}
       />
     );
   } else if (activeTab === "insights") {
@@ -727,7 +815,7 @@ function App() {
         movements={visibleMovements}
         groups={userGroups}
         userId={currentUserId}
-        onAuth={() => setAuthOpen(true)}
+        onAuth={() => { pushInternalState("auth"); setAuthOpen(true); }}
         onOpenMovement={openMovement}
       />
     );
@@ -746,10 +834,10 @@ function App() {
         onJoinCode={handleJoinCode}
         onLeaveGroup={handleLeaveGroup}
         onReset={resetLocalApp}
-        onPlus={() => setSheetOpen(true)}
+        onPlus={() => { pushInternalState("sheet"); setSheetOpen(true); }}
         onToast={showToast}
-        onAuth={() => setAuthOpen(true)}
-        onLogout={handleLogout}
+        onAuth={() => { pushInternalState("auth"); setAuthOpen(true); }}
+        onAbmelden={handleAbmelden}
         onRefresh={async () => {
           await refreshProfile();
           await loadData();
@@ -760,16 +848,18 @@ function App() {
 
   return (
     <>
-      <AppShell activeTab={activeTab} onTabChange={changeTab} onPlus={() => setSheetOpen(true)}>
-        {content}
-      </AppShell>
+      <div onPointerDown={startEdgeSwipe} onPointerMove={moveEdgeSwipe} onPointerUp={endEdgeSwipe} onPointerCancel={endEdgeSwipe}>
+        <AppShell activeTab={activeTab} onTabChange={changeTab} onPlus={() => { pushInternalState("sheet"); setSheetOpen(true); }}>
+          {content}
+        </AppShell>
+      </div>
       <BottomSheet
         open={sheetOpen}
         groups={groups}
         memberships={memberships}
         isAuthenticated={Boolean(authUser)}
         onClose={() => setSheetOpen(false)}
-        onAuth={() => setAuthOpen(true)}
+        onAuth={() => { pushInternalState("auth"); setAuthOpen(true); }}
         onJoinCode={handleJoinCode}
         onCreate={handleCreateMovement}
       />
