@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type FormEvent, type PointerEvent } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { anonymizeUserProfile, createGroup, deleteMovement, deleteUserMovements, requestAccountDeletion, searchUsers, updateProfileSettings } from "../data/queries";
-import type { AdminUserResult, Group, GroupMembership, Movement, Scope, User, UserStats } from "../types";
+import type { AdminUserResult, Group, GroupMembership, Movement, User, UserStats } from "../types";
 import { GroupVisual } from "../components/GroupVisual";
 import { Icon } from "../components/Icon";
 import { SettingsScreen } from "./Settings";
@@ -136,7 +136,6 @@ export function Profile({
   const [newPassword, setNewPassword] = useState("");
   const [groupName, setGroupName] = useState("");
   const [groupCategory, setGroupCategory] = useState("");
-  const [groupScope, setGroupScope] = useState<Scope>("external");
   const [groupIcon, setGroupIcon] = useState("");
   const [groupDescription, setGroupDescription] = useState("");
   const [groupCode, setGroupCode] = useState("");
@@ -265,7 +264,7 @@ export function Profile({
   async function submitGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!profile) return;
-    if (groupScope === "internal" && groupCode.length !== 5) {
+    if (groupCode.length !== 5) {
       onToast("Interne Gruppen brauchen genau 5 Zeichen Einladungscode.");
       return;
     }
@@ -274,7 +273,7 @@ export function Profile({
       await createGroup({
         name: groupName,
         category: groupCategory,
-        scope: groupScope,
+        scope: "internal",
         icon: groupIcon,
         description: groupDescription,
         inviteCode: groupCode,
@@ -321,7 +320,7 @@ export function Profile({
 
 
   async function removeUser(item: AdminUserResult, deletePosts: boolean) {
-    const label = deletePosts ? "Nutzer anonymisieren und alle Beitraege loeschen?" : "Nutzer anonymisieren und Beitraege behalten?";
+    const label = deletePosts ? "Nutzer anonymisieren und alle Beiträge löschen?" : "Nutzer anonymisieren und Beiträge behalten?";
     if (!window.confirm(label)) return;
     setBusy(true);
     try {
@@ -329,9 +328,9 @@ export function Profile({
       await anonymizeUserProfile(item.id);
       setUserResults((current) => current.filter((userResult) => userResult.id !== item.id));
       await onRefresh();
-      onToast(deletePosts ? "Nutzer anonymisiert und Beitraege geloescht." : "Nutzer anonymisiert.");
+      onToast(deletePosts ? "Nutzer anonymisiert und Beiträge gelöscht." : "Nutzer anonymisiert.");
     } catch (error) {
-      onToast(error instanceof Error ? error.message : "Nutzer konnte nicht geloescht werden.");
+      onToast(error instanceof Error ? error.message : "Nutzer konnte nicht gelöscht werden.");
     } finally {
       setBusy(false);
     }
@@ -540,21 +539,16 @@ export function Profile({
                     <h3>Gruppen erstellen</h3>
                     <input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Name" required />
                     <input value={groupCategory} onChange={(event) => setGroupCategory(event.target.value)} placeholder="Kategorie" required />
-                    <select value={groupScope} onChange={(event) => setGroupScope(event.target.value as Scope)}>
-                      <option value="external">Extern</option>
-                      <option value="internal">Intern</option>
-                    </select>
+                    <input value="Intern" readOnly aria-label="Gruppentyp" />
                     <input value={groupIcon} onChange={(event) => setGroupIcon(event.target.value)} placeholder="Icon oder Initialen" />
                     <textarea value={groupDescription} onChange={(event) => setGroupDescription(event.target.value)} placeholder="Beschreibung" rows={3} />
-                    {groupScope === "internal" ? (
-                      <input
-                        value={groupCode}
-                        onChange={(event) => setGroupCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))}
-                        placeholder="5-stelliger Einladungscode"
-                        maxLength={5}
-                        required
-                      />
-                    ) : null}
+                    <input
+                      value={groupCode}
+                      onChange={(event) => setGroupCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))}
+                      placeholder="5-stelliger Einladungscode"
+                      maxLength={5}
+                      required
+                    />
                     <button className="primary-button" type="submit" disabled={busy}>
                       Gruppe erstellen
                     </button>
@@ -875,13 +869,9 @@ export function Profile({
                   <h3>Gruppen erstellen</h3>
                   <input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Name" required />
                   <input value={groupCategory} onChange={(event) => setGroupCategory(event.target.value)} placeholder="Kategorie" required />
-                  <select value={groupScope} onChange={(event) => setGroupScope(event.target.value as Scope)}>
-                    <option value="external">Extern</option>
-                    <option value="internal">Intern</option>
-                  </select>
+                    <input value="Intern" readOnly aria-label="Gruppentyp" />
                   <input value={groupIcon} onChange={(event) => setGroupIcon(event.target.value)} placeholder="Icon oder Initialen" />
                   <textarea value={groupDescription} onChange={(event) => setGroupDescription(event.target.value)} placeholder="Beschreibung" rows={3} />
-                  {groupScope === "internal" ? (
                     <input
                       value={groupCode}
                       onChange={(event) => setGroupCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))}
@@ -889,7 +879,6 @@ export function Profile({
                       maxLength={5}
                       required
                     />
-                  ) : null}
                   <button className="primary-button" type="submit" disabled={busy}>
                     Gruppe erstellen
                   </button>
@@ -930,7 +919,7 @@ export function Profile({
                         </span>
                         <div className="admin-result-actions">
                           <button type="button" onClick={() => removeUser(item, false)} disabled={busy}>Anonymisieren</button>
-                          <button type="button" onClick={() => removeUser(item, true)} disabled={busy}>Nutzer + Beitraege loeschen</button>
+                          <button type="button" onClick={() => removeUser(item, true)} disabled={busy}>Nutzer + Beiträge löschen</button>
                         </div>
                       </article>
                     ))}
@@ -963,7 +952,7 @@ export function Profile({
             <Icon name="groups" size={20} />
             <span>
               <strong>Gruppen ansehen</strong>
-              <small>Öffentliche Kontexte und interne Räume</small>
+              <small>Interne Räume und Einladungscodes</small>
             </span>
           </button>
           <button type="button" onClick={() => onToast("Community-Regeln: sachlich, konkret, lösungsorientiert.")}>
@@ -1121,21 +1110,16 @@ export function Profile({
                 <h3>Gruppen erstellen</h3>
                 <input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Name" required />
                 <input value={groupCategory} onChange={(event) => setGroupCategory(event.target.value)} placeholder="Kategorie" required />
-                <select value={groupScope} onChange={(event) => setGroupScope(event.target.value as Scope)}>
-                  <option value="external">Extern</option>
-                  <option value="internal">Intern</option>
-                </select>
+                <input value="Intern" readOnly aria-label="Gruppentyp" />
                 <input value={groupIcon} onChange={(event) => setGroupIcon(event.target.value)} placeholder="Icon oder Initialen" />
                 <textarea value={groupDescription} onChange={(event) => setGroupDescription(event.target.value)} placeholder="Beschreibung" rows={3} />
-                {groupScope === "internal" ? (
-                  <input
-                    value={groupCode}
-                    onChange={(event) => setGroupCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))}
-                    placeholder="5-stelliger Einladungscode"
-                    maxLength={5}
-                    required
-                  />
-                ) : null}
+                <input
+                  value={groupCode}
+                  onChange={(event) => setGroupCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))}
+                  placeholder="5-stelliger Einladungscode"
+                  maxLength={5}
+                  required
+                />
                 <button className="primary-button" type="submit" disabled={busy}>
                   Gruppe erstellen
                 </button>

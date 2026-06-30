@@ -8,6 +8,7 @@ import { ReportModal } from "./components/ReportModal";
 import { SearchSheet } from "./components/SearchSheet";
 import { Toast } from "./components/Toast";
 import {
+  addDislike,
   addSupport,
   createMovement,
   createMovementUpdate,
@@ -23,6 +24,7 @@ import {
   markConductNoticeSeen,
   markNotificationRead,
   markNotificationsRead,
+  removeDislike,
   removeSupport,
   reportMovement as saveReport,
   updateMovement,
@@ -30,7 +32,8 @@ import {
 } from "./data/queries";
 import saxophoneImage from "./assets/onboarding/saxophone-onboarding.png";
 import { getSupabaseConfigError } from "./lib/supabase";
-import { isSupabaseConfigured } from "./lib/supabase";
+import { isSupabaseConfigured, supabase } from "./lib/supabase";
+import { sortMovementsForUser } from "./lib/recommendations";
 import { Feed } from "./screens/Feed";
 import { FirstRunFlow } from "./screens/FirstRunFlow";
 import { Groups } from "./screens/Groups";
@@ -46,7 +49,6 @@ import type {
   GroupMembership,
   Movement,
   Notification,
-  Scope,
   Tab,
   Toast as ToastType,
   UpdateMovementInput,
@@ -125,10 +127,10 @@ async function compressImage(file: File): Promise<{ blob: Blob; extension: "avif
 function LoadingScreen() {
   return (
     <div className="app-loading-screen">
-      <img src={saxophoneImage} alt="" />
+      <img className="app-loading-bg" src={saxophoneImage} alt="" />
       <div className="app-loading-overlay" />
       <div className="app-loading-brand">
-        <span>C</span>
+        <img className="app-loading-logo" src="/app-icon-512.png" alt="Citrus" />
         <h1>Citrus</h1>
         <p>Was zählt, wird sichtbar.</p>
       </div>
@@ -141,9 +143,11 @@ function App() {
   const [onboarded, setOnboarded] = useState(() => localStorage.getItem(STORAGE_KEYS.onboarded) === "true");
   const [firstRunCompleted, setFirstRunCompleted] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>("home");
-  const [scopeFilter, setScopeFilter] = useState<Scope | "all">("all");
   const [search, setSearch] = useState("");
   const [groupFilterId, setGroupFilterId] = useState<string | undefined>();
+  const [feedQueue, setFeedQueue] = useState<string[]>([]);
+  const [activeFeedIndex, setActiveFeedIndex] = useState(0);
+  const [newFeedItemsAvailable, setNewFeedItemsAvailable] = useState(false);
   const [detailMovementId, setDetailMovementId] = useState<string | undefined>();
   const [groupsViewOpen, setGroupsViewOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -159,9 +163,13 @@ function App() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [userSettings, setUserSettings] = useState<UserSettings>(defaultUserSettings);
   const [loadingData, setLoadingData] = useState(true);
+  const [initialDataReady, setInitialDataReady] = useState(false);
   const [dataError, setDataError] = useState(getSupabaseConfigError());
   const [splashReady, setSplashReady] = useState(false);
+  const [startupSplashDone, setStartupSplashDone] = useState(false);
   const edgeSwipeStart = useRef<{ x: number; y: number } | null>(null);
+  const previousTabRef = useRef<Tab>("home");
+  const dataSnapshotRef = useRef({ movementIds: new Set<string>(), notificationIds: new Set<string>() });
 
   const currentUserId = authUser?.id ?? null;
 
@@ -173,8 +181,9 @@ function App() {
     setFirstRunCompleted(localStorage.getItem(`${STORAGE_KEYS.firstRun}:${authUser.id}`) === "true");
   }, [authUser]);
 
-  const loadData = useCallback(async () => {
-    setLoadingData(true);
+  const loadData = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = Boolean(options?.silent);
+    if (!silent) setLoadingData(true);
     try {
       const [nextGroups, nextMovements, nextMemberships] = await Promise.all([
         fetchGroups(),
@@ -188,16 +197,29 @@ function App() {
         document.documentElement.dataset.theme = settingsBundle.userSettings.theme;
         localStorage.setItem("citrus:theme", settingsBundle.userSettings.theme);
       }
+
+      const previousSnapshot = dataSnapshotRef.current;
+      const nextMovementIds = new Set(nextMovements.map((movement) => movement.id));
+      const nextNotificationIds = new Set(nextNotifications.map((notification) => notification.id));
+      const hasNewMovement = nextMovements.some((movement) => !previousSnapshot.movementIds.has(movement.id));
+      const hasNewNotification = nextNotifications.some((notification) => !previousSnapshot.notificationIds.has(notification.id));
+
       setGroups(nextGroups);
       setMovements(nextMovements);
       setMemberships(nextMemberships);
       setNotifications(nextNotifications);
+      dataSnapshotRef.current = { movementIds: nextMovementIds, notificationIds: nextNotificationIds };
       setDataError(getSupabaseConfigError());
+      if (silent && (previousSnapshot.movementIds.size || previousSnapshot.notificationIds.size) && (hasNewMovement || hasNewNotification)) {
+        if (hasNewMovement) setNewFeedItemsAvailable(true);
+        showToast(hasNewNotification ? "Neue Benachrichtigung geladen." : "Neue Themen geladen.");
+      }
     } catch (error) {
       setDataError(getSupabaseConfigError());
-      showToast(error instanceof Error ? error.message : "Supabase-Anfrage fehlgeschlagen.");
+      if (!silent) showToast(error instanceof Error ? error.message : "Daten konnten nicht geladen werden.");
     } finally {
-      setLoadingData(false);
+      setInitialDataReady(true);
+      if (!silent) setLoadingData(false);
     }
   }, [currentUserId]);
 
@@ -206,13 +228,55 @@ function App() {
   }, [loadData]);
 
   useEffect(() => {
+    if (!initialDataReady) return;
+    let timeout: number | undefined;
+    const refreshSilently = () => {
+      if (document.hidden) return;
+      void loadData({ silent: true });
+    };
+    const interval = window.setInterval(refreshSilently, 30000);
+    const onVisibilityChange = () => {
+      if (!document.hidden) {
+        window.clearTimeout(timeout);
+        timeout = window.setTimeout(refreshSilently, 400);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const channel = isSupabaseConfigured
+      ? supabase
+          .channel(`citrus-live-${currentUserId ?? "public"}`)
+          .on("postgres_changes", { event: "*", schema: "public", table: "movements" }, refreshSilently)
+          .on("postgres_changes", { event: "*", schema: "public", table: "supports" }, refreshSilently)
+          .on("postgres_changes", { event: "*", schema: "public", table: "movement_reactions" }, refreshSilently)
+          .on("postgres_changes", { event: "*", schema: "public", table: "movement_updates" }, refreshSilently)
+          .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: currentUserId ? `user_id=eq.${currentUserId}` : undefined }, refreshSilently)
+          .subscribe()
+      : undefined;
+    return () => {
+      window.clearInterval(interval);
+      window.clearTimeout(timeout);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [currentUserId, initialDataReady, loadData]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => setSplashReady(true), 900);
     return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
-    if (!sheetOpen && !searchOpen && !authOpen && !reportTarget) return;
-    const scrollY = window.scrollY;
+    if (startupSplashDone) return;
+    if (splashReady && !authLoading && (initialDataReady || Boolean(dataError))) {
+      setStartupSplashDone(true);
+    }
+  }, [authLoading, dataError, initialDataReady, splashReady, startupSplashDone]);
+
+  useEffect(() => {
+    if (activeTab !== "feed" && !sheetOpen && !searchOpen && !authOpen && !reportTarget) return;
+    const isFeedLock = activeTab === "feed";
+    const scrollY = isFeedLock ? 0 : window.scrollY;
+    if (isFeedLock) window.scrollTo(0, 0);
     const previous = {
       overflow: document.body.style.overflow,
       position: document.body.style.position,
@@ -230,7 +294,7 @@ function App() {
       document.body.style.width = previous.width;
       window.scrollTo(0, scrollY);
     };
-  }, [authOpen, reportTarget, searchOpen, sheetOpen]);
+  }, [activeTab, authOpen, reportTarget, searchOpen, sheetOpen]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -264,6 +328,8 @@ function App() {
   }, [movements]);
 
   const stats = useMemo(() => deriveStats(movements, currentUserId), [currentUserId, movements]);
+  const internalGroups = useMemo(() => groups.filter((group) => group.scope === "internal"), [groups]);
+  const membershipGroupIds = useMemo(() => new Set(memberships.map((membership) => membership.groupId)), [memberships]);
   const visibleMovements = useMemo(
     () =>
       movements.map((movement) =>
@@ -273,15 +339,18 @@ function App() {
       ),
     [currentUserId, movements, userSettings.privacyVisibility],
   );
+  const internalVisibleMovements = useMemo(
+    () => visibleMovements.filter((movement) => movement.scope === "internal" && membershipGroupIds.has(movement.groupId)),
+    [membershipGroupIds, visibleMovements],
+  );
   const userGroups = useMemo(() => {
     const groupIds = new Set(
       movements
-        .filter((movement) => movement.userId === currentUserId || movement.supportedByUser)
+        .filter((movement) => movement.scope === "internal" && (movement.userId === currentUserId || movement.supportedByUser))
         .map((movement) => movement.groupId),
     );
-    const membershipGroupIds = new Set(memberships.map((membership) => membership.groupId));
-    return groups.filter((group) => membershipGroupIds.has(group.id) || groupIds.has(group.id));
-  }, [currentUserId, groups, memberships, movements]);
+    return internalGroups.filter((group) => membershipGroupIds.has(group.id) || groupIds.has(group.id));
+  }, [currentUserId, internalGroups, membershipGroupIds, movements]);
 
   const user = useMemo<User>(() => {
     if (!authUser) return fallbackUser();
@@ -299,48 +368,57 @@ function App() {
   }, [authUser, profile, stats.reached, userGroups]);
 
   const selectedMovement = detailMovementId
-    ? visibleMovements.find((movement) => movement.id === detailMovementId)
+    ? internalVisibleMovements.find((movement) => movement.id === detailMovementId)
     : undefined;
 
-  const filteredMovements = useMemo(() => {
+  const rankedFeedCandidates = useMemo(() => {
     const query = search.trim().toLowerCase();
-    const membershipGroupIds = new Set(memberships.map((membership) => membership.groupId));
-    const deduped = [...new Map(visibleMovements.map((movement) => [movement.id, movement])).values()];
+    const deduped = [...new Map(internalVisibleMovements.map((movement) => [movement.id, movement])).values()];
     const filtered = deduped
-      .filter((movement) => {
-        if (scopeFilter === "internal") return membershipGroupIds.has(movement.groupId);
-        if (scopeFilter === "external") {
-          return movement.scope === "external" && !membershipGroupIds.has(movement.groupId);
-        }
-        return movement.scope === "external" || membershipGroupIds.has(movement.groupId);
-      })
       .filter((movement) => (groupFilterId ? movement.groupId === groupFilterId : true))
-      .filter((movement) => (userSettings.feedPreferences.onlyGroups ? membershipGroupIds.has(movement.groupId) : true))
       .filter((movement) => {
         if (!query) return true;
         return [movement.title, movement.description, movement.groupName, movement.category, movement.authorUsername]
           .join(" ")
           .toLowerCase()
           .includes(query);
-      })
-      .sort((a, b) => {
-        if (userSettings.feedPreferences.newestFirst) {
-          return new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime();
-        }
-        const supportBoost = userSettings.feedPreferences.highlightSupported
-          ? Number(b.supportedByUser) * 30 - Number(a.supportedByUser) * 30
-          : 0;
-        const trendingScore = userSettings.feedPreferences.boostTrending
-          ? (b.trendingScore ?? 0) - (a.trendingScore ?? 0)
-          : b.weeklyGrowth + b.supporters - (a.weeklyGrowth + a.supporters);
-        return supportBoost + trendingScore;
       });
+    if (userSettings.feedPreferences.newestFirst) {
+      return [...filtered].sort((a, b) => {
+        const createdDiff = new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime();
+        return createdDiff || a.id.localeCompare(b.id);
+      });
+    }
+    const supportedGroupIds = filtered.filter((movement) => movement.supportedByUser).map((movement) => movement.groupId);
+    const interactedCategories = filtered
+      .filter((movement) => movement.supportedByUser || movement.userId === currentUserId)
+      .map((movement) => movement.category);
+    return sortMovementsForUser(filtered, {
+      userId: currentUserId,
+      membershipGroupIds,
+      supportedGroupIds,
+      interactedCategories,
+      mode: groupFilterId ? "groups" : "for-you",
+    });
+  }, [currentUserId, groupFilterId, internalVisibleMovements, membershipGroupIds, search, userSettings.feedPreferences.newestFirst]);
 
-    if (userSettings.feedPreferences.newestFirst) return filtered;
-    const high = filtered.filter((_, index) => index % 4 !== 3);
-    const lower = filtered.filter((_, index) => index % 4 === 3).reverse();
-    return high.flatMap((movement, index) => (index > 0 && index % 3 === 0 && lower.length ? [lower.shift()!, movement] : [movement]));
-  }, [groupFilterId, memberships, scopeFilter, search, userSettings.feedPreferences, visibleMovements]);
+  const movementsById = useMemo(() => new Map(internalVisibleMovements.map((movement) => [movement.id, movement])), [internalVisibleMovements]);
+  const feedMovements = useMemo(
+    () => feedQueue.map((id) => movementsById.get(id)).filter((movement): movement is Movement => Boolean(movement)),
+    [feedQueue, movementsById],
+  );
+  const visibleFeedMovements = feedQueue.length ? feedMovements : rankedFeedCandidates;
+
+  const rebuildFeedQueue = useCallback(() => {
+    setFeedQueue(rankedFeedCandidates.map((movement) => movement.id));
+    setActiveFeedIndex(0);
+    setNewFeedItemsAvailable(false);
+  }, [rankedFeedCandidates]);
+
+  useEffect(() => {
+    if (activeTab !== "feed" || feedQueue.length || loadingData) return;
+    rebuildFeedQueue();
+  }, [activeTab, feedQueue.length, loadingData, rebuildFeedQueue]);
 
   function showToast(message: string) {
     const nextToast = { id: Date.now(), message };
@@ -377,9 +455,10 @@ function App() {
       backgroundValue: input.imageFile ? imageUrl : input.backgroundValue,
     }, userId);
     await loadData();
-    setScopeFilter("all");
     setSearch("");
     setGroupFilterId(undefined);
+    setFeedQueue([]);
+    setActiveFeedIndex(0);
     setActiveTab("feed");
     setDetailMovementId(newMovementId);
     showToast("Bewegung gespeichert.");
@@ -465,7 +544,9 @@ function App() {
           ? {
               ...movement,
               supportedByUser: !movement.supportedByUser,
-              supporters: movement.supporters + (movement.supportedByUser ? -1 : 1),
+              dislikedByUser: movement.supportedByUser ? movement.dislikedByUser : false,
+              supporters: Math.max(0, movement.supporters + (movement.supportedByUser ? -1 : 1)),
+              dislikes: Math.max(0, (movement.dislikes ?? 0) - (!movement.supportedByUser && movement.dislikedByUser ? 1 : 0)),
               weeklyGrowth: Math.max(0, movement.weeklyGrowth + (movement.supportedByUser ? -1 : 1)),
             }
           : movement,
@@ -476,11 +557,49 @@ function App() {
       if (target.supportedByUser) {
         await removeSupport(id, authUser.id);
       } else {
+        if (target.dislikedByUser) await removeDislike(id, authUser.id);
         await addSupport(id, authUser.id);
       }
     } catch (error) {
       await loadData();
       showToast(error instanceof Error ? error.message : "Unterstützung konnte nicht gespeichert werden.");
+    }
+  }
+
+  async function handleToggleDislike(id: string) {
+    if (!authUser) {
+      setAuthOpen(true);
+      return;
+    }
+
+    const target = movements.find((movement) => movement.id === id);
+    if (!target) return;
+
+    setMovements((current) =>
+      current.map((movement) =>
+        movement.id === id
+          ? {
+              ...movement,
+              dislikedByUser: !movement.dislikedByUser,
+              supportedByUser: movement.dislikedByUser ? movement.supportedByUser : false,
+              dislikes: Math.max(0, (movement.dislikes ?? 0) + (movement.dislikedByUser ? -1 : 1)),
+              supporters: Math.max(0, movement.supporters - (!movement.dislikedByUser && movement.supportedByUser ? 1 : 0)),
+              weeklyGrowth: Math.max(0, movement.weeklyGrowth - (!movement.dislikedByUser && movement.supportedByUser ? 1 : 0)),
+            }
+          : movement,
+      ),
+    );
+
+    try {
+      if (target.dislikedByUser) {
+        await removeDislike(id, authUser.id);
+      } else {
+        if (target.supportedByUser) await removeSupport(id, authUser.id);
+        await addDislike(id, authUser.id);
+      }
+    } catch (error) {
+      await loadData();
+      showToast(error instanceof Error ? error.message : "Reaktion konnte nicht gespeichert werden.");
     }
   }
 
@@ -626,18 +745,27 @@ function App() {
   function openGroup(groupId: string) {
     setGroupsViewOpen(false);
     setGroupFilterId(groupId);
-    setScopeFilter("all");
     setSearch("");
+    setFeedQueue([]);
+    setActiveFeedIndex(0);
     setActiveTab("feed");
   }
 
   function changeTab(tab: Tab) {
-    if (tab !== activeTab) pushInternalState(`tab:${tab}`);
+    if (tab !== activeTab) {
+      previousTabRef.current = activeTab;
+      pushInternalState(`tab:${tab}`);
+    }
     setActiveTab(tab);
     setDetailMovementId(undefined);
     setGroupsViewOpen(false);
     setNotificationsOpen(false);
     setSearchOpen(false);
+    if (tab === "feed") {
+      setFeedQueue([]);
+      setActiveFeedIndex(0);
+      setNewFeedItemsAvailable(false);
+    }
   }
 
   async function handleMarkNotificationsRead() {
@@ -650,7 +778,24 @@ function App() {
   async function handleAbmelden() {
     try {
       await signOut();
-      await loadData();
+      setMovements([]);
+      setNotifications([]);
+      setMemberships([]);
+      setSearch("");
+      setGroupFilterId(undefined);
+      setFeedQueue([]);
+      setActiveFeedIndex(0);
+      setNewFeedItemsAvailable(false);
+      setDetailMovementId(undefined);
+      setGroupsViewOpen(false);
+      setNotificationsOpen(false);
+      setSearchOpen(false);
+      setSheetOpen(false);
+      setAuthOpen(false);
+      setActiveTab("home");
+      previousTabRef.current = "home";
+      dataSnapshotRef.current = { movementIds: new Set<string>(), notificationIds: new Set<string>() };
+      window.history.replaceState({ citrus: "signed-out" }, "", window.location.pathname);
       showToast("Du wurdest abgemeldet.");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Abmelden fehlgeschlagen.");
@@ -663,8 +808,9 @@ function App() {
     setOnboarded(false);
     setFirstRunCompleted(false);
     setSearch("");
-    setScopeFilter("all");
     setGroupFilterId(undefined);
+    setFeedQueue([]);
+    setActiveFeedIndex(0);
     setGroupsViewOpen(false);
     setNotificationsOpen(false);
     setSearchOpen(false);
@@ -682,7 +828,7 @@ function App() {
       if (detailMovementId) { setDetailMovementId(undefined); return; }
       if (notificationsOpen) { setNotificationsOpen(false); return; }
       if (groupsViewOpen) { setGroupsViewOpen(false); return; }
-      if (activeTab !== "home") { setActiveTab("home"); return; }
+      if (activeTab !== "home") { setActiveTab(previousTabRef.current === activeTab ? "home" : previousTabRef.current); return; }
     }
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
@@ -703,8 +849,7 @@ function App() {
     if (deltaX > 74 && deltaY < 58) {
       edgeSwipeStart.current = null;
       if (detailMovementId) setDetailMovementId(undefined);
-      else if (activeTab === "feed") setActiveTab("home");
-      else if (activeTab !== "home") setActiveTab("feed");
+      else if (activeTab !== "home") setActiveTab(previousTabRef.current === activeTab ? "home" : previousTabRef.current);
     }
   }
 
@@ -712,7 +857,7 @@ function App() {
     edgeSwipeStart.current = null;
   }
 
-  const showSplash = !splashReady || authLoading || (loadingData && !dataError);
+  const showSplash = !startupSplashDone && (!splashReady || authLoading || (!initialDataReady && loadingData && !dataError));
   if (showSplash) return <LoadingScreen />;
 
   if (!authUser) {
@@ -738,7 +883,7 @@ function App() {
       userName={user.name}
       isAuthenticated={Boolean(authUser)}
       stats={stats}
-      movements={visibleMovements}
+      movements={internalVisibleMovements}
       notifications={notifications}
       loading={loadingData}
       error={dataError}
@@ -749,6 +894,7 @@ function App() {
       onOpenNotifications={() => { pushInternalState("notifications"); setNotificationsOpen(true); }}
       onPlus={() => { pushInternalState("sheet"); setSheetOpen(true); }}
       onAuth={() => { pushInternalState("auth"); setAuthOpen(true); }}
+      onRefresh={() => loadData({ silent: true })}
     />
   );
 
@@ -769,7 +915,7 @@ function App() {
     content = (
       <Notifications
         notifications={notifications}
-        movements={visibleMovements}
+        movements={internalVisibleMovements}
         isAuthenticated={Boolean(authUser)}
         onBack={() => setNotificationsOpen(false)}
         onOpenNotification={async (notification) => {
@@ -787,23 +933,29 @@ function App() {
       />
     );
   } else if (groupsViewOpen) {
-    content = <Groups groups={groups} onBack={() => setGroupsViewOpen(false)} onOpenGroup={openGroup} />;
+    content = <Groups groups={internalGroups} onBack={() => setGroupsViewOpen(false)} onOpenGroup={openGroup} />;
   } else if (activeTab === "feed") {
     content = (
       <Feed
-        movements={filteredMovements}
-        scopeFilter={scopeFilter}
-        search={search}
+        movements={visibleFeedMovements}
+        groups={userGroups}
+        activeIndex={activeFeedIndex}
         groupFilterId={groupFilterId}
         loading={loadingData}
-        onScopeChange={setScopeFilter}
-        onSearchChange={setSearch}
-        onClearGroupFilter={() => setGroupFilterId(undefined)}
+        newItemsAvailable={newFeedItemsAvailable}
+        onActiveIndexChange={setActiveFeedIndex}
+        onRefreshQueue={rebuildFeedQueue}
+        onClearGroupFilter={() => {
+          setGroupFilterId(undefined);
+          setFeedQueue([]);
+          setActiveFeedIndex(0);
+        }}
+        onSelectGroup={openGroup}
         onOpenMovement={openMovement}
         onToggleSupport={handleToggleSupport}
+        onToggleDislike={handleToggleDislike}
         onShare={shareMovement}
         onReport={reportMovement}
-        onOpenGroup={openGroup}
         onPlus={() => { pushInternalState("sheet"); setSheetOpen(true); }}
       />
     );
@@ -812,7 +964,7 @@ function App() {
       <Insights
         stats={stats}
         isAuthenticated={Boolean(authUser)}
-        movements={visibleMovements}
+        movements={internalVisibleMovements}
         groups={userGroups}
         userId={currentUserId}
         onAuth={() => { pushInternalState("auth"); setAuthOpen(true); }}
@@ -823,9 +975,9 @@ function App() {
     content = (
       <Profile
         user={user}
-        groups={groups}
+        groups={internalGroups}
         memberships={memberships}
-        movements={visibleMovements}
+        movements={internalVisibleMovements}
         stats={stats}
         isAuthenticated={Boolean(authUser)}
         onOpenGroups={() => setGroupsViewOpen(true)}
@@ -855,7 +1007,7 @@ function App() {
       </div>
       <BottomSheet
         open={sheetOpen}
-        groups={groups}
+        groups={internalGroups}
         memberships={memberships}
         isAuthenticated={Boolean(authUser)}
         onClose={() => setSheetOpen(false)}
@@ -865,7 +1017,7 @@ function App() {
       />
       <SearchSheet
         open={searchOpen}
-        movements={visibleMovements}
+        movements={internalVisibleMovements}
         onClose={() => setSearchOpen(false)}
         onOpenMovement={openMovement}
       />

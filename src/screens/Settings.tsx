@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent
 import { useAuth } from "../auth/AuthProvider";
 import { Icon } from "../components/Icon";
 import { GroupVisual } from "../components/GroupVisual";
-import { canUseWebPush, registerForPushNotifications } from "../lib/pushNotifications";
+import { getWebPushSupportMessage, registerForPushNotifications } from "../lib/pushNotifications";
 import {
   createFeedback,
   fetchModerationSummary,
@@ -199,6 +199,7 @@ export function SettingsScreen({
   const [feedbackBody, setFeedbackBody] = useState("");
   const [busy, setBusy] = useState(false);
   const edgeSwipeStart = useRef<{ x: number; y: number } | null>(null);
+  const pushSupportMessage = getWebPushSupportMessage();
 
   const ownMovements = useMemo(() => movements.filter((movement) => movement.userId === user.id), [movements, user.id]);
   const supportedMovements = useMemo(() => movements.filter((movement) => movement.supportedByUser), [movements]);
@@ -228,6 +229,11 @@ export function SettingsScreen({
     setAvatarPreview(url);
     return () => URL.revokeObjectURL(url);
   }, [avatarFile]);
+
+  useEffect(() => {
+    const scroller = document.querySelector(".screen-content");
+    scroller?.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+  }, [pane]);
 
   useEffect(() => {
     if (!authUser) return;
@@ -313,10 +319,16 @@ export function SettingsScreen({
 
   async function enablePushNotifications() {
     if (!authUser) return;
+    const supportMessage = getWebPushSupportMessage();
+    if (supportMessage) {
+      onToast(supportMessage);
+      return;
+    }
     setBusy(true);
     try {
       await registerForPushNotifications(authUser.id);
       onToast("Push-Benachrichtigungen aktiviert.");
+      await onRefresh();
     } catch (error) {
       onToast(error instanceof Error ? error.message : "Push konnte nicht aktiviert werden.");
     } finally {
@@ -582,11 +594,11 @@ export function SettingsScreen({
       {pane === "notifications" ? (
         <>
           <SettingsCard>
-            <button className="secondary-button full" type="button" onClick={enablePushNotifications} disabled={busy || !canUseWebPush()}>
+            <button className="secondary-button full" type="button" onClick={enablePushNotifications} disabled={busy}>
               Push-Benachrichtigungen aktivieren
             </button>
             <FrequencyRow label="Neue Beiträge in ausgewählten Gruppen" value={notificationPreferences.newGroupPosts} onChange={(value) => updateNotifications({ ...notificationPreferences, newGroupPosts: value })} />
-            <FrequencyRow label="Neue Likes/Unterstützungen auf eigene Beiträge" value={notificationPreferences.ownPostSupport} onChange={(value) => updateNotifications({ ...notificationPreferences, ownPostSupport: value })} />
+            <FrequencyRow label="Neue Unterstützungen auf eigene Beiträge" value={notificationPreferences.ownPostSupport} onChange={(value) => updateNotifications({ ...notificationPreferences, ownPostSupport: value })} />
             <FrequencyRow label="Wichtige Updates zu unterstützten Beiträgen" value={notificationPreferences.supportedUpdates} onChange={(value) => updateNotifications({ ...notificationPreferences, supportedUpdates: value })} />
             <FrequencyRow label="Trending-Hinweise für relevante Gruppen" value={notificationPreferences.groupTrending} onChange={(value) => updateNotifications({ ...notificationPreferences, groupTrending: value })} />
             <FrequencyRow label="Umgesetzte Projekte/Statusänderungen" value={notificationPreferences.implementedProjects} onChange={(value) => updateNotifications({ ...notificationPreferences, implementedProjects: value })} />
@@ -649,7 +661,8 @@ export function SettingsScreen({
 
       {pane === "security" ? (
         <SettingsCard>
-          <button className="settings-danger-button" type="button" onClick={leaveAllDevices} disabled={busy}>Alle Geräte abmelden</button>
+          <button className="secondary-button full" type="button" onClick={onAbmelden} disabled={busy}>Von diesem Gerät abmelden</button>
+          <button className="settings-danger-button" type="button" onClick={leaveAllDevices} disabled={busy}>Überall abmelden</button>
         </SettingsCard>
       ) : null}
 

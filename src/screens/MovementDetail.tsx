@@ -16,11 +16,11 @@ type MovementDetailProps = {
 };
 
 const statusLabels: Record<Movement["status"], string> = {
-  submitted: "Eingereicht",
-  trending: "Trendet",
+  submitted: "Neu",
+  trending: "Sammelt Unterstützung",
   review: "In Prüfung",
   implementation: "In Umsetzung",
-  done: "Fertig",
+  done: "Umgesetzt",
 };
 
 function relativeTime(value?: string) {
@@ -158,7 +158,7 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
         <div className="detail-meta-grid two">
           <span>
             <strong>{movement.supporters.toLocaleString("de-DE")}</strong>
-            <small>Unterstützer</small>
+            <small>Stimmen</small>
           </span>
           <span>
             <strong>{statusLabels[movement.status]}</strong>

@@ -8,26 +8,26 @@ type FirstRunFlowProps = {
 
 const firstRunSlides = [
   {
-    title: "Willkommen bei Citrus.",
-    text: "Hier werden Anliegen, Ideen und Wünsche sichtbar. Du siehst, was Menschen in deiner Umgebung bewegt – und kannst Themen unterstützen, bevor sie untergehen.",
+    title: "Gib deiner Stimme Gewicht.",
+    text: "Teile Anliegen, die gesehen werden sollen. Andere können sie unterstützen und sichtbar machen, was wirklich zählt.",
   },
   {
-    title: "Intern, Extern, Öffentlich.",
-    text: "Intern ist dein direkter Kreis. Extern zeigt dir andere Gruppen. Öffentlich zeigt dir das große Ganze.",
+    title: "Stimme täglich ab.",
+    text: "Citrus ist für kurze tägliche Beteiligung gemacht: Unterstütze Themen, verfolge Trends und sieh, was an Bedeutung gewinnt.",
   },
   {
-    title: "Unterstütze, was zählt.",
-    text: "Mit deiner Stimme machst du sichtbar, welche Themen wichtiger werden. Je mehr Menschen ein Anliegen unterstützen, desto stärker wird es.",
+    title: "Räume für echte Gruppen.",
+    text: "Interne Räume funktionieren für Uni, Gemeinde, Firma oder Community. Einladungscodes bringen Menschen in den richtigen Raum.",
   },
   {
     title: "Gestalte Citrus mit.",
-    text: "Zum Start kommst du in unsere interne Citrus-Gruppe. Dort kannst du Feedback geben, Fehler melden und mitentscheiden, wie die App besser wird.",
+    text: "Zum Start kannst du in die Citrus-Gruppe. Dort sammelst du Feedback, meldest Fehler und hilfst, die App besser zu machen.",
   },
 ];
 
 export function FirstRunFlow({ onJoinCitrus }: FirstRunFlowProps) {
   const [step, setStep] = useState(0);
-  const [code, setCode] = useState("CITRUS");
+  const [code, setCode] = useState("CITRS");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const isJoinStep = step >= firstRunSlides.length;
@@ -59,9 +59,9 @@ export function FirstRunFlow({ onJoinCitrus }: FirstRunFlowProps) {
 
         {isJoinStep ? (
           <form className="first-run-card final" onSubmit={submit}>
-            <span className="first-run-kicker">Citrus Feedback</span>
-            <h1>Deine erste Gruppe wartet.</h1>
-            <p>Wir fügen dich zur internen Citrus-Gruppe hinzu, damit du Feedback geben und die App mitverbessern kannst.</p>
+            <span className="first-run-kicker">Citrus-Testgruppe</span>
+            <h1>Starte im Citrus-Raum.</h1>
+            <p>Der Code ist vorausgefüllt. Du kannst beitreten, um Feedback zu geben und Citrus mitzuverbessern.</p>
             <label>
               Gruppencode
               <input

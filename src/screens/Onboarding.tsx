@@ -13,18 +13,18 @@ type OnboardingProps = {
 const onboardingSlides = [
   {
     image: saxophoneImage,
-    title: "Jede Stimme zählt.",
-    text: "Sorge dafür, dass man sie hört. Teile Anliegen, die gesehen werden sollten – und finde Menschen, die es genauso fühlen.",
+    title: "Gib deiner Stimme Gewicht.",
+    text: "Teile Anliegen, die gesehen werden sollen. Citrus macht sichtbar, was Menschen wirklich bewegt.",
   },
   {
     image: hummingbirdImage,
-    title: "Veränderung beginnt im Kleinen.",
-    text: "Stimme täglich für Themen, die mehr Aufmerksamkeit verdienen.",
+    title: "Stimme täglich für Themen.",
+    text: "Unterstütze Anliegen, die dir wichtig sind, und sieh, welche Themen in deinen Gruppen wachsen.",
   },
   {
     image: starsImage,
-    title: "Die besten Ideen beginnen als Lichtpunkt.",
-    text: "Entdecke, was Menschen wirklich wollen – lokal, öffentlich und gemeinsam.",
+    title: "Räume für echte Beteiligung.",
+    text: "Interne Gruppen für Uni, Gemeinde, Firma oder Community. Zum Start bist du in der Citrus-Gruppe dabei.",
   },
 ];
 
@@ -63,7 +63,7 @@ export function Onboarding({ onAuthenticated }: OnboardingProps) {
       onAuthenticated();
     } catch (authError) {
       console.error("Authentication failed:", authError);
-      setError(authError instanceof Error ? authError.message : "Auth-Vorgang fehlgeschlagen.");
+      setError(authError instanceof Error ? authError.message : "Anmeldung fehlgeschlagen.");
     } finally {
       setLoading(false);
     }
@@ -87,8 +87,8 @@ export function Onboarding({ onAuthenticated }: OnboardingProps) {
         {isAuthStep ? (
           <div className="onboarding-auth-login">
             <div className="onboarding-auth-copy">
-              <h1>E Pluribus Unum.</h1>
-              <p>Aus vielen Stimmen wird eine Richtung.</p>
+              <h1>Willkommen bei Citrus.</h1>
+              <p>Aus vielen Stimmen wird sichtbar, was zählt.</p>
             </div>
 
             <form className="onboarding-auth-card" onSubmit={submit}>

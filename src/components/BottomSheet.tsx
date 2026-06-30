@@ -1,12 +1,11 @@
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import type { BackgroundType, CreateMovementInput, Group, GroupMembership, MovementType, Scope } from "../types";
+import type { BackgroundType, CreateMovementInput, Group, GroupMembership, MovementType } from "../types";
 import { GroupVisual } from "./GroupVisual";
 import { Icon } from "./Icon";
 
@@ -24,16 +23,16 @@ type BottomSheetProps = {
 };
 
 const typeLabels: Array<{ id: MovementType; emoji: string; label: string; hint: string }> = [
-  { id: "problem", emoji: "!", label: "Problem", hint: "Etwas funktioniert nicht oder stoert." },
+  { id: "problem", emoji: "!", label: "Problem", hint: "Etwas funktioniert nicht oder stört." },
   { id: "idea", emoji: "*", label: "Idee", hint: "Ein neuer Vorschlag, der etwas besser macht." },
   { id: "improvement", emoji: "+", label: "Verbesserung", hint: "Etwas Bestehendes soll optimiert werden." },
-  { id: "question", emoji: "?", label: "Frage", hint: "Du willst etwas klaeren oder sichtbar machen." },
+  { id: "question", emoji: "?", label: "Frage", hint: "Du willst etwas klären oder sichtbar machen." },
 ];
 
 const quickEmoji = ["*", "+", "!", "?", "C", "#", "<>", "~"];
 
 const colorOptions = [
-  { label: "Citrus Gruen", value: "#7AC943" },
+  { label: "Citrus Grün", value: "#7AC943" },
   { label: "Warm Orange", value: "#FF7A1A" },
   { label: "Tiefes Blau", value: "#123C69" },
   { label: "Violett", value: "#7C3AED" },
@@ -50,9 +49,7 @@ const gradientOptions = [
 
 type Draft = {
   step: number;
-  selectedScope: Scope | "";
   selectedGroupId: string;
-  publicSearch: string;
   inviteCode: string;
   type: MovementType | "";
   title: string;
@@ -66,7 +63,8 @@ type Draft = {
 
 function isInteractiveTarget(target: EventTarget | null) {
   const element = target instanceof HTMLElement ? target : null;
-  return Boolean(element?.closest("input, textarea, select, button, a, [data-no-sheet-drag]"));
+  if (element?.closest(".sheet-handle")) return false;
+  return Boolean(element?.closest("input, textarea, select, button:not(.sheet-handle), a"));
 }
 
 export function BottomSheet({
@@ -80,9 +78,7 @@ export function BottomSheet({
   onCreate,
 }: BottomSheetProps) {
   const [step, setStep] = useState(1);
-  const [selectedScope, setSelectedScope] = useState<Scope | "">("");
   const [selectedGroupId, setSelectedGroupId] = useState("");
-  const [publicSearch, setPublicSearch] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [type, setType] = useState<MovementType | "">("");
   const [title, setTitle] = useState("");
@@ -103,28 +99,20 @@ export function BottomSheet({
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const internalMemberships = memberships.filter((membership) => membership.group.scope === "internal");
-  const publicGroups = groups.filter((group) => group.scope === "external");
+  const internalGroups = groups.filter((group) => group.scope === "internal");
   const selectedGroup =
-    selectedScope === "internal"
-      ? internalMemberships.find((membership) => membership.groupId === selectedGroupId)?.group
-      : groups.find((group) => group.id === selectedGroupId);
-
-  const publicResults = useMemo(() => {
-    const query = publicSearch.trim().toLowerCase();
-    if (!query) return publicGroups.slice(0, 8);
-    return publicGroups.filter((group) => `${group.name} ${group.category}`.toLowerCase().includes(query)).slice(0, 10);
-  }, [publicGroups, publicSearch]);
+    internalMemberships.find((membership) => membership.groupId === selectedGroupId)?.group ??
+    internalGroups.find((group) => group.id === selectedGroupId);
 
   const hasDraft = Boolean(
-    selectedScope || selectedGroupId || type || title.trim() || description.trim() || category.trim() || imageFile || backgroundValue || isAnonymous,
+    selectedGroupId || type || title.trim() || description.trim() || category.trim() || imageFile || backgroundValue || isAnonymous,
   );
-  const totalSteps = 6;
+  const totalSteps = 5;
   const canContinue =
-    (step === 1 && Boolean(selectedScope)) ||
-    (step === 2 && Boolean(selectedGroup)) ||
-    (step === 3 && Boolean(type)) ||
-    (step === 4 && Boolean(title.trim()) && Boolean(description.trim())) ||
-    step === 5;
+    (step === 1 && Boolean(selectedGroup)) ||
+    (step === 2 && Boolean(type)) ||
+    (step === 3 && Boolean(title.trim())) ||
+    step === 4;
 
   useEffect(() => {
     if (!open) {
@@ -139,9 +127,7 @@ export function BottomSheet({
     try {
       const draft = JSON.parse(raw) as Partial<Draft>;
       setStep(Math.min(totalSteps, Math.max(1, Number(draft.step) || 1)));
-      setSelectedScope(draft.selectedScope === "internal" || draft.selectedScope === "external" ? draft.selectedScope : "");
       setSelectedGroupId(draft.selectedGroupId || "");
-      setPublicSearch(draft.publicSearch || "");
       setInviteCode(draft.inviteCode || "");
       setType((draft.type as MovementType | "") || "");
       setTitle(draft.title || "");
@@ -160,9 +146,7 @@ export function BottomSheet({
     if (!open || !hasDraft) return;
     const draft: Draft = {
       step,
-      selectedScope,
       selectedGroupId,
-      publicSearch,
       inviteCode,
       type,
       title,
@@ -174,7 +158,7 @@ export function BottomSheet({
       isAnonymous,
     };
     sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-  }, [backgroundType, backgroundValue, category, description, emoji, hasDraft, inviteCode, isAnonymous, open, publicSearch, selectedGroupId, selectedScope, step, title, type]);
+  }, [backgroundType, backgroundValue, category, description, emoji, hasDraft, inviteCode, isAnonymous, open, selectedGroupId, step, title, type]);
 
   useEffect(() => {
     if (!imageFile) {
@@ -189,9 +173,7 @@ export function BottomSheet({
   function resetDraft() {
     sessionStorage.removeItem(DRAFT_KEY);
     setStep(1);
-    setSelectedScope("");
     setSelectedGroupId("");
-    setPublicSearch("");
     setInviteCode("");
     setType("");
     setTitle("");
@@ -208,7 +190,7 @@ export function BottomSheet({
 
   function requestClose() {
     if (hasDraft) {
-      const keepDraft = window.confirm("Entwurf behalten? OK behaelt ihn, Abbrechen verwirft ihn.");
+      const keepDraft = window.confirm("Entwurf behalten? OK behält ihn, Abbrechen verwirft ihn.");
       if (!keepDraft) resetDraft();
       onClose();
       return;
@@ -230,19 +212,22 @@ export function BottomSheet({
     if (!isDragging || !start) return;
     const deltaY = event.clientY - start.y;
     const deltaX = Math.abs(event.clientX - start.x);
-    if (deltaY <= 0 || deltaX > deltaY * 1.25) return;
-    if (start.scrollTop > 0) return;
+    if (deltaY <= 0 || deltaX > deltaY * 1.25 || start.scrollTop > 0) return;
     setDragY(Math.max(0, deltaY));
   }
 
   function endDrag(event: ReactPointerEvent<HTMLElement>) {
     if (!isDragging) return;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can be released automatically by mobile browsers.
+    }
     setIsDragging(false);
     const shouldClose = dragY > 96;
     setDragY(0);
     dragStart.current = null;
-    if (shouldClose) requestClose();
+    if (shouldClose) onClose();
   }
 
   function goNext() {
@@ -275,15 +260,15 @@ export function BottomSheet({
   }
 
   async function submitMovement() {
-    if (!selectedGroup || !type || !title.trim() || !description.trim()) return;
+    if (!selectedGroup || !type || !title.trim()) return;
     setSubmitting(true);
     try {
       await onCreate({
         title: title.trim(),
-        description: description.trim(),
+        description: description.trim() || "Noch keine Details.",
         groupId: selectedGroup.id,
         groupName: selectedGroup.name,
-        scope: selectedGroup.scope,
+        scope: "internal",
         type,
         category: category.trim() || selectedGroup.category,
         emoji,
@@ -306,11 +291,17 @@ export function BottomSheet({
 
   return (
     <>
-      <div className={`sheet-backdrop ${open ? "open" : ""}`} onClick={requestClose} />
+      <div
+        className={`sheet-backdrop ${open ? "open" : ""}`}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) requestClose();
+        }}
+      />
       <aside
         className={`bottom-sheet ${open ? "open" : ""} ${isDragging ? "dragging" : ""}`}
         aria-hidden={!open}
         style={sheetStyle}
+        onClick={(event) => event.stopPropagation()}
         onPointerDown={startDrag}
         onPointerMove={moveDrag}
         onPointerUp={endDrag}
@@ -318,9 +309,9 @@ export function BottomSheet({
       >
         <button className="sheet-handle" type="button" aria-label="Bottom Sheet herunterziehen" />
 
-        <div className="wizard-header" data-no-sheet-drag>
+        <div className="wizard-header">
           <button className="wizard-back" type="button" onClick={() => setStep((current) => Math.max(1, current - 1))} disabled={step === 1}>
-            Zurueck
+            Zurück
           </button>
           <div>
             <strong>{step} von {totalSteps}</strong>
@@ -328,7 +319,7 @@ export function BottomSheet({
               {Array.from({ length: totalSteps }).map((_, index) => <span className={index + 1 <= step ? "active" : ""} key={index} />)}
             </div>
           </div>
-          <button className="icon-button" type="button" onClick={requestClose} aria-label="Schliessen">
+          <button className="icon-button" type="button" onClick={requestClose} aria-label="Schließen">
             <Icon name="x" size={20} />
           </button>
         </div>
@@ -336,27 +327,13 @@ export function BottomSheet({
         <div className="wizard-body" ref={bodyRef}>
           {step === 1 ? (
             <section className="wizard-step">
-              <h2>Wo moechtest du etwas bewegen?</h2>
-              <div className="context-tiles">
-                <button className={`context-tile ${selectedScope === "internal" ? "active" : ""}`} type="button" onClick={() => { setSelectedScope("internal"); setSelectedGroupId(""); autoNext(2); }}>
-                  <span>In</span><strong>Intern</strong><small>Fuer Gruppen, denen du beigetreten bist.</small>
-                </button>
-                <button className={`context-tile ${selectedScope === "external" ? "active" : ""}`} type="button" onClick={() => { setSelectedScope("external"); setSelectedGroupId(publicGroups[0]?.id ?? ""); setCategory(publicGroups[0]?.category ?? ""); autoNext(2); }}>
-                  <span>Ex</span><strong>Extern</strong><small>Fuer Apps, Marken, Staedte und Produkte.</small>
-                </button>
-              </div>
-            </section>
-          ) : null}
-
-          {step === 2 && selectedScope === "internal" ? (
-            <section className="wizard-step">
-              <h2>Interne Gruppe waehlen</h2>
+              <h2>Interne Gruppe wählen</h2>
               {!isAuthenticated ? (
                 <button className="public-create-row" type="button" onClick={onAuth}><span className="public-icon">C</span><span><strong>Anmelden</strong><small>Melde dich an, um interne Gruppen zu sehen.</small></span><Icon name="chevron" size={17} /></button>
               ) : internalMemberships.length ? (
                 <div className="wizard-list">
                   {internalMemberships.map((membership) => (
-                    <button className={`public-result ${selectedGroupId === membership.groupId ? "active" : ""}`} type="button" key={membership.id} onClick={() => { setSelectedGroupId(membership.groupId); setCategory(membership.group.category); autoNext(3); }}>
+                    <button className={`public-result ${selectedGroupId === membership.groupId ? "active" : ""}`} type="button" key={membership.id} onClick={() => { setSelectedGroupId(membership.groupId); setCategory(membership.group.category); autoNext(2); }}>
                       <GroupVisual group={membership.group} className="public-avatar" />
                       <span><strong>{membership.group.name}</strong><small>{membership.group.category} - Intern</small></span>
                       <Icon name="chevron" size={16} />
@@ -372,17 +349,13 @@ export function BottomSheet({
             </section>
           ) : null}
 
-          {step === 2 && selectedScope === "external" ? (
+          {step === 2 ? (
             <section className="wizard-step">
-              <h2>Externe Gruppe waehlen</h2>
-              <label className="public-search"><Icon name="search" size={18} /><input value={publicSearch} onChange={(event) => setPublicSearch(event.target.value)} placeholder="Apps, Marken oder Staedte suchen" /></label>
-              <span className="wizard-subtitle">Haeufig verwendet</span>
-              <div className="wizard-list">
-                {publicResults.map((group) => (
-                  <button className={`public-result ${selectedGroupId === group.id ? "active" : ""}`} type="button" key={group.id} onClick={() => { setSelectedGroupId(group.id); setCategory(group.category); setPublicSearch(group.name); autoNext(3); }}>
-                    <GroupVisual group={group} className="public-avatar" />
-                    <span><strong>{group.name}</strong><small>{group.category}</small></span>
-                    <Icon name="chevron" size={16} />
+              <h2>Was möchtest du teilen?</h2>
+              <div className="type-list">
+                {typeLabels.map((item) => (
+                  <button className={`type-option ${type === item.id ? "active" : ""}`} type="button" key={item.id} onClick={() => { setType(item.id); autoNext(3); }}>
+                    <span>{item.emoji}</span><strong>{item.label}</strong><small>{item.hint}</small>
                   </button>
                 ))}
               </div>
@@ -391,30 +364,17 @@ export function BottomSheet({
 
           {step === 3 ? (
             <section className="wizard-step">
-              <h2>Was moechtest du teilen?</h2>
-              <div className="type-list">
-                {typeLabels.map((item) => (
-                  <button className={`type-option ${type === item.id ? "active" : ""}`} type="button" key={item.id} onClick={() => { setType(item.id); autoNext(4); }}>
-                    <span>{item.emoji}</span><strong>{item.label}</strong><small>{item.hint}</small>
-                  </button>
-                ))}
-              </div>
+              <h2>Beschreibe dein Anliegen</h2>
+              <label>Was soll sich ändern?<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={90} placeholder="Was soll sich bewegen?" /><small>{title.length}/90</small></label>
+              <label>Details<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={800} rows={6} placeholder="Optional: Was ist wichtig, damit andere dein Anliegen verstehen?" /><small>{description.length}/800</small></label>
+              <label>Kategorie<input value={category} onChange={(event) => setCategory(event.target.value)} maxLength={40} placeholder={selectedGroup?.category || "Optional"} /></label>
+              <div className="conduct-inline">Bitte bleib sachlich. Keine Beleidigungen, keine Hetze und keine persönlichen Angriffe.</div>
             </section>
           ) : null}
 
           {step === 4 ? (
             <section className="wizard-step">
-              <h2>Beschreibe deine Bewegung</h2>
-              <label>Titel<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={90} placeholder="Was soll sich bewegen?" /><small>{title.length}/90</small></label>
-              <label>Beschreibung<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={800} rows={6} placeholder="Beschreibe konkret, was sich aendern soll." /><small>{description.length}/800</small></label>
-              <label>Kategorie<input value={category} onChange={(event) => setCategory(event.target.value)} maxLength={40} placeholder={selectedGroup?.category || "Optional"} /></label>
-              <div className="conduct-inline">Bitte bleib sachlich. Keine Beleidigungen, keine Hetze und keine persoenlichen Angriffe.</div>
-            </section>
-          ) : null}
-
-          {step === 5 ? (
-            <section className="wizard-step">
-              <h2>Darstellung waehlen</h2>
+              <h2>Darstellung wählen</h2>
               <div className="visual-mode-grid" data-no-sheet-drag>
                 {(["image", "color", "gradient", "emoji"] as BackgroundType[]).map((mode) => (
                   <button className={backgroundType === mode ? "active" : ""} type="button" key={mode} onClick={() => { setBackgroundType(mode); if (mode !== "image") setImageFile(undefined); }}>
@@ -426,7 +386,7 @@ export function BottomSheet({
               {backgroundType === "image" ? (
                 <>
                   {previewUrl ? <div className="image-preview"><img src={previewUrl} alt="" /><button type="button" onClick={() => chooseImage(undefined)}>Bild entfernen</button></div> : null}
-                  <label className="file-picker"><span>Foto waehlen</span><small>{imageFile ? imageFile.name : "Standard-Dateiauswahl, kein erzwungener Kamera-Modus."}</small><input type="file" accept="image/*" onChange={(event) => chooseImage(event.target.files?.[0])} /></label>
+                  <label className="file-picker"><span>Foto wählen</span><small>{imageFile ? imageFile.name : "Standard-Dateiauswahl, kein erzwungener Kamera-Modus."}</small><input type="file" accept="image/*" onChange={(event) => chooseImage(event.target.files?.[0])} /></label>
                   {imageError ? <p className="field-error">{imageError}</p> : null}
                 </>
               ) : null}
@@ -437,7 +397,7 @@ export function BottomSheet({
             </section>
           ) : null}
 
-          {step === 6 ? (
+          {step === 5 ? (
             <section className="wizard-step">
               <h2>Vorschau</h2>
               <div className="visibility-toggle" data-no-sheet-drag>
@@ -448,9 +408,9 @@ export function BottomSheet({
               <article className={`movement-card preview-card visual-preview ${previewUrl ? "has-image" : ""}`} style={visualPreviewStyle}>
                 {previewUrl ? <img className="reel-image" src={previewUrl} alt="" /> : null}
                 {!previewUrl && backgroundType === "emoji" ? <div className="preview-emoji">{emoji}</div> : null}
-                <h3>{title || "Dein Titel"}</h3>
+                <h3>{title || "Dein Anliegen"}</h3>
                 <p>{selectedGroup?.name} - {typeLabels.find((item) => item.id === type)?.label || "Typ"} - {isAnonymous ? "Anonym" : "Mit Namen"}</p>
-                <div className="movement-meta"><strong>0 Unterstuetzer</strong><span>{description.slice(0, 110)}</span></div>
+                <div className="movement-meta"><strong>0 Stimmen</strong><span>{description.slice(0, 110)}</span></div>
               </article>
             </section>
           ) : null}
@@ -460,7 +420,7 @@ export function BottomSheet({
           {step < totalSteps ? (
             <button className="primary-button" type="button" onClick={goNext} disabled={!canContinue}>Weiter</button>
           ) : (
-            <button className="primary-button" type="button" onClick={submitMovement} disabled={submitting || !selectedGroup || !type || !title.trim() || !description.trim()}>
+            <button className="primary-button" type="button" onClick={submitMovement} disabled={submitting || !selectedGroup || !type || !title.trim()}>
               {submitting ? "Wird gespeichert..." : "Bewegung starten"}
             </button>
           )}

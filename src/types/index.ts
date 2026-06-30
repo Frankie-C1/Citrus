@@ -78,11 +78,13 @@ export type Movement = {
   scope: Scope;
   type: MovementType;
   supporters: number;
+  dislikes?: number;
   weeklyGrowth: number;
   status: MovementStatus;
   category: string;
   updates: Update[];
   supportedByUser: boolean;
+  dislikedByUser?: boolean;
   userSupportCreatedAt?: string;
   userId?: string | null;
   authorUsername?: string | null;

@@ -19,6 +19,8 @@ type IconProps = {
     | "x"
     | "share"
     | "star"
+    | "thumbsUp"
+    | "thumbsDown"
     | "message"
     | "more"
     | "camera"
@@ -152,6 +154,20 @@ export function Icon({ name, size = 22 }: IconProps) {
     ),
     star: (
       <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z" />
+    ),
+    thumbsUp: (
+      <>
+        <path d="M7 10v10" />
+        <path d="M4 10h3v10H4z" />
+        <path d="M7 10 11 3c.8.2 1.4.8 1.4 1.7V8H18a2 2 0 0 1 2 2.3l-1.2 7A2 2 0 0 1 16.8 19H7" />
+      </>
+    ),
+    thumbsDown: (
+      <>
+        <path d="M7 14V4" />
+        <path d="M4 4h3v10H4z" />
+        <path d="M7 14 11 21c.8-.2 1.4-.8 1.4-1.7V16H18a2 2 0 0 0 2-2.3l-1.2-7A2 2 0 0 0 16.8 5H7" />
+      </>
     ),
     message: (
       <>

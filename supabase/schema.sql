@@ -98,6 +98,15 @@ create table if not exists public.supports (
   unique (movement_id, user_id)
 );
 
+create table if not exists public.movement_reactions (
+  id uuid primary key default gen_random_uuid(),
+  movement_id uuid references public.movements(id) on delete cascade,
+  user_id uuid references public.profiles(id) on delete cascade,
+  reaction_type text not null check (reaction_type in ('dislike')),
+  created_at timestamptz default now(),
+  unique (movement_id, user_id, reaction_type)
+);
+
 create table if not exists public.movement_updates (
   id uuid primary key default gen_random_uuid(),
   movement_id uuid references public.movements(id) on delete cascade,
@@ -261,6 +270,7 @@ alter table public.groups enable row level security;
 alter table public.group_members enable row level security;
 alter table public.movements enable row level security;
 alter table public.supports enable row level security;
+alter table public.movement_reactions enable row level security;
 alter table public.movement_updates enable row level security;
 alter table public.reports enable row level security;
 
@@ -368,6 +378,27 @@ create policy supports_delete_own on public.supports
 for delete to authenticated
 using (user_id = auth.uid());
 
+drop policy if exists reactions_read_for_visible_movements on public.movement_reactions;
+create policy reactions_read_for_visible_movements on public.movement_reactions
+for select to anon, authenticated
+using (
+  exists (
+    select 1 from public.movements m
+    where m.id = movement_reactions.movement_id
+    and (m.scope = 'external' or public.is_admin() or public.can_read_group(m.group_id))
+  )
+);
+
+drop policy if exists reactions_insert_own on public.movement_reactions;
+create policy reactions_insert_own on public.movement_reactions
+for insert to authenticated
+with check (user_id = auth.uid());
+
+drop policy if exists reactions_delete_own on public.movement_reactions;
+create policy reactions_delete_own on public.movement_reactions
+for delete to authenticated
+using (user_id = auth.uid());
+
 drop policy if exists updates_read_for_visible_movements on public.movement_updates;
 create policy updates_read_for_visible_movements on public.movement_updates
 for select to anon, authenticated
@@ -410,6 +441,8 @@ create index if not exists movements_group_id_idx on public.movements(group_id);
 create index if not exists movements_user_id_idx on public.movements(user_id);
 create index if not exists supports_movement_id_idx on public.supports(movement_id);
 create index if not exists supports_user_id_idx on public.supports(user_id);
+create index if not exists movement_reactions_movement_id_idx on public.movement_reactions(movement_id);
+create index if not exists movement_reactions_user_id_idx on public.movement_reactions(user_id);
 create index if not exists movement_updates_movement_id_idx on public.movement_updates(movement_id);
 create index if not exists reports_movement_id_idx on public.reports(movement_id);
 
@@ -423,6 +456,9 @@ grant insert, update, delete on public.movements to authenticated;
 
 grant select on public.supports to anon, authenticated;
 grant insert, delete on public.supports to authenticated;
+
+grant select on public.movement_reactions to anon, authenticated;
+grant insert, delete on public.movement_reactions to authenticated;
 
 grant select on public.movement_updates to anon, authenticated;
 grant insert on public.movement_updates to authenticated;

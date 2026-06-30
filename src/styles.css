@@ -3846,7 +3846,7 @@ body,
   backdrop-filter: blur(24px);
   transform: translate(-50%, 105%);
   transition: transform 240ms ease;
-  z-index: 40;
+  z-index: 80;
 }
 
 .search-sheet.open {
@@ -4985,9 +4985,14 @@ body,
 
 .feed-shell {
   background: #050505;
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
 }
 
 .feed-shell .screen-content {
+  height: 100dvh;
+  min-height: 100dvh;
   padding-bottom: 0;
   overflow: hidden;
   background: #050505;
@@ -5490,6 +5495,14 @@ body,
 
 .feed-action-button.support.active svg {
   fill: var(--feed-accent);
+}
+
+.feed-action-button.dislike.active {
+  color: #ff7a7a;
+}
+
+.feed-action-button.dislike.active svg {
+  fill: #ff7a7a;
 }
 
 .feed-more-menu {
@@ -6835,21 +6848,49 @@ select {
   overflow: hidden;
 }
 
+.fullscreen-feed {
+  --feed-bottom-reserve: calc(96px + env(safe-area-inset-bottom, 0px));
+}
+
+.feed-eyebrow {
+  display: block;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.feed-new-items {
+  position: absolute;
+  z-index: 24;
+  top: calc(env(safe-area-inset-top, 0px) + 72px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: #ffcc00;
+  color: #111111;
+  font-size: 13px;
+  font-weight: 850;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
+}
+
 .feed-reels {
-  height: 100dvh;
+  height: calc(100dvh - var(--feed-bottom-reserve));
   overflow: hidden !important;
   overscroll-behavior: none;
-  touch-action: pan-y;
+  touch-action: none;
 }
 
 .feed-reel-track {
-  height: 100dvh;
+  height: 100%;
 }
 
 .feed-reel-track .feed-slide,
 .feed-slide {
-  height: 100dvh;
-  min-height: 100dvh;
+  height: 100%;
+  min-height: 100%;
   width: 100%;
 }
 
@@ -7098,4 +7139,318 @@ select {
   border-color: rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.1);
   color: #ffffff;
+}
+
+/* Mobile UX fixes: splash, pull refresh, settings overflow, safe bottom spacing. */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+button,
+a,
+.nav-item,
+.nav-plus,
+.home-round-button,
+.feed-action-button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus:not(:focus-visible),
+.nav-plus:focus:not(:focus-visible),
+.nav-item:focus:not(:focus-visible) {
+  outline: 0;
+  box-shadow: none;
+}
+
+.screen-content {
+  scroll-behavior: auto;
+  overscroll-behavior-x: none;
+  padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px));
+}
+
+.screen,
+.home-screen,
+.profile-reference-screen,
+.settings-layer,
+.notifications-screen,
+.groups-screen,
+.insights-screen {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.app-loading-screen .app-loading-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.app-loading-screen .app-loading-logo {
+  position: relative;
+  inset: auto;
+  width: 74px;
+  height: 74px;
+  border-radius: 19px;
+  object-fit: contain;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+}
+
+.app-loading-brand span {
+  display: none;
+}
+
+.home-screen {
+  position: relative;
+  padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px));
+  touch-action: pan-y;
+}
+
+.home-pull-refresh {
+  position: sticky;
+  top: calc(env(safe-area-inset-top, 0px) + 6px);
+  z-index: 10;
+  width: fit-content;
+  min-height: 34px;
+  margin: -42px auto 8px;
+  padding: 5px 11px 5px 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  pointer-events: none;
+  background: rgba(9, 9, 9, 0.88);
+  color: #ffffff;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.18);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.home-pull-refresh.visible {
+  opacity: 1;
+}
+
+.home-pull-refresh span {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: #ffd400;
+  color: #050506;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.home-pull-refresh span.spinning {
+  animation: citrus-spin 760ms linear infinite;
+}
+
+.home-pull-refresh small {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 12px;
+  font-weight: 740;
+}
+
+@keyframes citrus-spin {
+  to { transform: rotate(360deg); }
+}
+
+.home-tabs {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+  scroll-snap-type: x proximity;
+}
+
+.home-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.home-tabs button {
+  flex: 0 0 auto;
+  min-width: max-content;
+  scroll-snap-align: start;
+}
+
+.trending-feature {
+  max-width: 100%;
+  animation: citrus-card-in 180ms ease-out;
+}
+
+.trending-content h2,
+.topic-copy strong,
+.notification-card strong,
+.search-result-item strong,
+.settings-item strong,
+.settings-frequency-row span,
+.settings-toggle-row span,
+.settings-group-card span {
+  overflow-wrap: anywhere;
+}
+
+.home-tab-note {
+  border: 1px solid var(--reference-line);
+  border-radius: 22px;
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  background: var(--reference-surface);
+  box-shadow: var(--reference-soft-shadow);
+}
+
+.home-tab-note span {
+  color: var(--reference-muted);
+  line-height: 1.35;
+}
+
+@keyframes citrus-card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.settings-layer {
+  width: 100%;
+  max-width: 100%;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-bottom: calc(148px + env(safe-area-inset-bottom, 0px));
+}
+
+.settings-card,
+.settings-section,
+.settings-list,
+.settings-item,
+.settings-frequency-row,
+.settings-toggle-row,
+.settings-group-card,
+.notification-card,
+.search-result-item,
+.top-topic-item {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.settings-frequency-row {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 12px 0;
+}
+
+.settings-frequency-row select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  justify-self: stretch;
+}
+
+.settings-toggle-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.settings-inline-form,
+.invite-inline,
+.admin-search-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  max-width: 100%;
+}
+
+.settings-inline-form input,
+.invite-inline input,
+.admin-search-row input {
+  min-width: 0;
+}
+
+.notifications-screen,
+.notification-list,
+.search-sheet-results {
+  padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px));
+}
+
+.search-sheet {
+  touch-action: pan-y;
+}
+
+.search-sheet-results {
+  overscroll-behavior: contain;
+}
+
+.bottom-nav,
+.feed-bottom-nav {
+  width: min(calc(100vw - 2px), 438px);
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 390px) {
+  .reference-home-header,
+  .home-screen,
+  .notifications-screen,
+  .settings-layer {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .settings-inline-form,
+  .invite-inline,
+  .admin-search-row {
+    grid-template-columns: 1fr;
+  }
+
+  .topic-sparkline {
+    display: none;
+  }
+}
+
+:root[data-theme="dark"] .home-tab-note,
+:root[data-theme="dark"] .home-pull-refresh {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Final feed lock: keep this last so older mobile overrides cannot make the page scroll. */
+.feed-shell,
+.feed-shell .screen-content,
+.fullscreen-feed {
+  height: 100dvh !important;
+  min-height: 100dvh !important;
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+
+.feed-reels {
+  height: 100dvh !important;
+  overflow-y: auto !important;
+  overscroll-behavior-y: contain !important;
+  scroll-snap-type: y mandatory !important;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: pan-y !important;
+}
+
+.feed-slide {
+  height: 100dvh !important;
+  min-height: 100dvh !important;
+  scroll-snap-align: start !important;
+  scroll-snap-stop: always !important;
+}
+
+.feed-slide-content {
+  touch-action: pan-y !important;
+}
+
+.feed-bottom-nav {
+  border-top: 0 !important;
+  box-shadow: none !important;
+  background: #050505 !important;
 }

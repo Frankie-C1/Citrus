@@ -1,30 +1,26 @@
-import { useEffect, useRef, useState } from "react";
-import type { Movement, Scope } from "../types";
+import { useEffect, useRef, useState, type PointerEvent, type UIEvent } from "react";
+import type { Group, Movement } from "../types";
 import { Icon } from "../components/Icon";
 import { displayAuthorName, movementImageUrl, movementVisualStyle, shouldHideAuthorIdentity } from "../lib/movementPresentation";
 
 type FeedProps = {
   movements: Movement[];
-  scopeFilter: Scope | "all";
-  search: string;
-  groupFilterId?: string;
+  groups: Group[];
+  activeIndex: number;
   loading: boolean;
-  onScopeChange: (scope: Scope | "all") => void;
-  onSearchChange: (search: string) => void;
+  groupFilterId?: string;
+  newItemsAvailable?: boolean;
+  onActiveIndexChange: (index: number | ((current: number) => number)) => void;
+  onRefreshQueue: () => void;
   onClearGroupFilter: () => void;
+  onSelectGroup: (groupId: string) => void;
   onOpenMovement: (movement: Movement) => void;
   onToggleSupport: (id: string) => void;
+  onToggleDislike: (id: string) => void;
   onShare: (movement: Movement) => void;
   onReport: (movement: Movement) => void;
-  onOpenGroup: (groupId: string) => void;
   onPlus: () => void;
 };
-
-const filterOptions: Array<{ id: Scope | "all"; label: string; hint: string }> = [
-  { id: "internal", label: "Intern", hint: "Nur deine Gruppen" },
-  { id: "external", label: "Extern", hint: "Andere Gruppen" },
-  { id: "all", label: "Öffentlich / Alles", hint: "Alle Beiträge" },
-];
 
 function relativeTime(value?: string) {
   if (!value) return "";
@@ -49,6 +45,10 @@ function initials(name: string) {
   );
 }
 
+function voteLabel(value: number) {
+  return `${value.toLocaleString("de-DE")} ${value === 1 ? "Stimme" : "Stimmen"}`;
+}
+
 function copyMovementLink(movement: Movement) {
   const url = `${window.location.origin}${window.location.pathname}?movement=${movement.id}`;
   void navigator.clipboard?.writeText(url);
@@ -56,184 +56,143 @@ function copyMovementLink(movement: Movement) {
 
 export function Feed({
   movements,
-  scopeFilter,
+  groups,
+  activeIndex,
   groupFilterId,
   loading,
-  onScopeChange,
+  newItemsAvailable,
+  onActiveIndexChange,
+  onRefreshQueue,
   onClearGroupFilter,
+  onSelectGroup,
   onOpenMovement,
   onToggleSupport,
+  onToggleDislike,
   onShare,
   onReport,
-  onOpenGroup,
   onPlus,
 }: FeedProps) {
   const [filterOpen, setFilterOpen] = useState(false);
   const [menuMovementId, setMenuMovementId] = useState<string | undefined>();
-  const [activeIndex, setActiveIndex] = useState(0);
-  const filterRef = useRef<HTMLDivElement>(null);
-  const touchStart = useRef({ x: 0, y: 0 });
-  const ignoreNextClick = useRef(false);
-  const wheelLocked = useRef(false);
-  const lastTap = useRef(0);
-  const activeFilter = filterOptions.find((option) => option.id === scopeFilter) ?? filterOptions[2];
-  const groupName = groupFilterId ? movements.find((movement) => movement.groupId === groupFilterId)?.groupName : "";
+  const reelRef = useRef<HTMLDivElement>(null);
+  const scrollTimer = useRef<number | undefined>(undefined);
+  const clickTimer = useRef<number | undefined>(undefined);
+  const tapRef = useRef<{ id: string; time: number; x: number; y: number } | null>(null);
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const suppressClickUntilRef = useRef(0);
+  const maxIndex = loading ? 0 : Math.max(0, movements.length - 1);
+  const safeActiveIndex = Math.min(maxIndex, Math.max(0, activeIndex));
+  const selectedGroup = groupFilterId ? groups.find((group) => group.id === groupFilterId) : undefined;
 
   useEffect(() => {
-    setActiveIndex((index) => Math.min(index, Math.max(0, movements.length)));
-  }, [movements.length]);
+    if (activeIndex > maxIndex) onActiveIndexChange(maxIndex);
+  }, [activeIndex, maxIndex, onActiveIndexChange]);
 
   useEffect(() => {
-    if (!filterOpen) return;
-    function closeOnOutside(event: PointerEvent) {
-      if (!filterRef.current?.contains(event.target as Node)) setFilterOpen(false);
-    }
-    window.addEventListener("pointerdown", closeOnOutside);
-    return () => window.removeEventListener("pointerdown", closeOnOutside);
-  }, [filterOpen]);
+    const reel = reelRef.current;
+    if (!reel) return;
+    const target = reel.children.item(safeActiveIndex) as HTMLElement | null;
+    target?.scrollIntoView({ block: "nearest" });
+  }, [safeActiveIndex, movements.length]);
 
-  function snapToSlide(direction: 1 | -1) {
-    const maxIndex = Math.max(0, movements.length);
-    setActiveIndex((index) => Math.min(maxIndex, Math.max(0, index + direction)));
+  useEffect(() => () => {
+    window.clearTimeout(scrollTimer.current);
+    window.clearTimeout(clickTimer.current);
+  }, []);
+
+  function updateActiveFromScroll(event: UIEvent<HTMLDivElement>) {
+    window.clearTimeout(scrollTimer.current);
+    const element = event.currentTarget;
+    scrollTimer.current = window.setTimeout(() => {
+      const next = Math.round(element.scrollTop / Math.max(1, element.clientHeight));
+      onActiveIndexChange(Math.min(maxIndex, Math.max(0, next)));
+    }, 90);
   }
 
-  useEffect(() => {
-    function handleTouchStart(event: TouchEvent) {
-      const touch = event.touches[0];
-      if (!touch) return;
-      touchStart.current = { x: touch.clientX, y: touch.clientY };
-    }
-
-    function handleTouchEnd(event: TouchEvent) {
-      const touch = event.changedTouches[0];
-      if (!touch) return;
-      const deltaY = touchStart.current.y - touch.clientY;
-      const deltaX = touchStart.current.x - touch.clientX;
-      if (Math.abs(deltaY) <= 34 || Math.abs(deltaY) <= Math.abs(deltaX) * 1.15) return;
-      ignoreNextClick.current = true;
-      snapToSlide(deltaY > 0 ? 1 : -1);
-      window.setTimeout(() => {
-        ignoreNextClick.current = false;
-      }, 280);
-    }
-
-    function handleWheel(event: WheelEvent) {
-      if (wheelLocked.current || Math.abs(event.deltaY) < 18) return;
-      event.preventDefault();
-      wheelLocked.current = true;
-      snapToSlide(event.deltaY > 0 ? 1 : -1);
-      window.setTimeout(() => {
-        wheelLocked.current = false;
-      }, 360);
-    }
-
-    window.addEventListener("touchstart", handleTouchStart, { passive: true, capture: true });
-    window.addEventListener("touchend", handleTouchEnd, { passive: true, capture: true });
-    window.addEventListener("wheel", handleWheel, { passive: false, capture: true });
-    return () => {
-      window.removeEventListener("touchstart", handleTouchStart, { capture: true });
-      window.removeEventListener("touchend", handleTouchEnd, { capture: true });
-      window.removeEventListener("wheel", handleWheel, { capture: true });
-    };
-  }, [movements.length]);
-
-  function openFromContent(movement: Movement) {
-    if (ignoreNextClick.current) return;
-    onOpenMovement(movement);
+  function chooseAll() {
+    setFilterOpen(false);
+    onClearGroupFilter();
   }
 
-  function likeFromImage(movement: Movement) {
-    if (!movement.supportedByUser) onToggleSupport(movement.id);
+  function chooseGroup(groupId: string) {
+    setFilterOpen(false);
+    onSelectGroup(groupId);
   }
 
-  function handleImageTap(movement: Movement) {
+  function isInteractiveTarget(target: EventTarget | null) {
+    return target instanceof HTMLElement && Boolean(target.closest("button, a, input, textarea, select"));
+  }
+
+  function startTap(event: PointerEvent<HTMLElement>) {
+    if (isInteractiveTarget(event.target)) return;
+    pointerStartRef.current = { x: event.clientX, y: event.clientY };
+  }
+
+  function finishTap(event: PointerEvent<HTMLElement>, movement: Movement) {
+    if (isInteractiveTarget(event.target)) return;
+    const start = pointerStartRef.current;
+    pointerStartRef.current = null;
+    if (!start) return;
+    const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+    if (moved > 14) return;
     const now = Date.now();
-    if (now - lastTap.current < 320) {
-      ignoreNextClick.current = true;
-      likeFromImage(movement);
-      window.setTimeout(() => {
-        ignoreNextClick.current = false;
-      }, 220);
+    const previousTap = tapRef.current;
+    if (
+      previousTap &&
+      previousTap.id === movement.id &&
+      now - previousTap.time < 290 &&
+      Math.hypot(event.clientX - previousTap.x, event.clientY - previousTap.y) < 34
+    ) {
+      window.clearTimeout(clickTimer.current);
+      tapRef.current = null;
+      suppressClickUntilRef.current = now + 360;
+      onToggleSupport(movement.id);
+      return;
     }
-    lastTap.current = now;
+    tapRef.current = { id: movement.id, time: now, x: event.clientX, y: event.clientY };
+  }
+
+  function openMovementFromTap(movement: Movement) {
+    if (Date.now() < suppressClickUntilRef.current) return;
+    window.clearTimeout(clickTimer.current);
+    clickTimer.current = window.setTimeout(() => onOpenMovement(movement), 230);
   }
 
   return (
     <div className="feed-screen fullscreen-feed">
       <header className="feed-topbar">
-        <div className="feed-filter-wrap" ref={filterRef}>
-          <button
-            className="feed-title-button"
-            type="button"
-            onClick={() => setFilterOpen((open) => !open)}
-            aria-expanded={filterOpen}
-          >
-            <span>Feed</span>
+        <div className="feed-filter-wrap">
+          <button className="feed-title-button" type="button" onClick={() => setFilterOpen((open) => !open)} aria-expanded={filterOpen}>
+            <span>{selectedGroup ? selectedGroup.name : "Alle"}</span>
             <Icon name="chevron" size={18} />
           </button>
           {filterOpen ? (
             <div className="feed-filter-menu">
-              {filterOptions.map((option) => (
-                <button
-                  type="button"
-                  key={option.id}
-                  className={scopeFilter === option.id ? "active" : ""}
-                  onClick={() => {
-                    onScopeChange(option.id);
-                    setFilterOpen(false);
-                  }}
-                >
-                  <span>
-                    <strong>{option.label}</strong>
-                    <small>{option.hint}</small>
-                  </span>
-                  {scopeFilter === option.id ? <Icon name="checkCircle" size={18} /> : null}
+              <button className={!groupFilterId ? "active" : ""} type="button" onClick={chooseAll}>
+                <span><strong>Alle</strong><small>Alle sichtbaren internen Anliegen</small></span>
+                {!groupFilterId ? <Icon name="checkCircle" size={18} /> : null}
+              </button>
+              {groups.map((group) => (
+                <button className={groupFilterId === group.id ? "active" : ""} type="button" key={group.id} onClick={() => chooseGroup(group.id)}>
+                  <span><strong>{group.name}</strong><small>{group.category}</small></span>
+                  {groupFilterId === group.id ? <Icon name="checkCircle" size={18} /> : null}
                 </button>
               ))}
             </div>
           ) : null}
         </div>
-
         <button className="feed-camera-button" type="button" onClick={onPlus} aria-label="Beitrag erstellen">
           <Icon name="camera" size={22} />
         </button>
       </header>
 
-      {groupFilterId ? (
-        <button className="feed-group-filter" type="button" onClick={onClearGroupFilter}>
-          {groupName || "Gruppe"} <Icon name="x" size={14} />
+      {newItemsAvailable ? (
+        <button className="feed-new-items" type="button" onClick={onRefreshQueue}>
+          Neue Beiträge anzeigen
         </button>
       ) : null}
 
-      <div
-        className="feed-reels"
-        aria-label={`${activeFilter.label} Feed`}
-        onWheel={(event) => {
-          if (wheelLocked.current || Math.abs(event.deltaY) < 24) return;
-          wheelLocked.current = true;
-          snapToSlide(event.deltaY > 0 ? 1 : -1);
-          window.setTimeout(() => {
-            wheelLocked.current = false;
-          }, 430);
-        }}
-        onTouchStart={(event) => {
-          const touch = event.touches[0];
-          touchStart.current = { x: touch.clientX, y: touch.clientY };
-        }}
-        onTouchEnd={(event) => {
-          const touch = event.changedTouches[0];
-          const deltaY = touchStart.current.y - touch.clientY;
-          const deltaX = touchStart.current.x - touch.clientX;
-          if (Math.abs(deltaY) > 44 && Math.abs(deltaY) > Math.abs(deltaX) * 1.25) {
-            ignoreNextClick.current = true;
-            snapToSlide(deltaY > 0 ? 1 : -1);
-            window.setTimeout(() => {
-              ignoreNextClick.current = false;
-            }, 260);
-          }
-        }}
-      >
-        <div className="feed-reel-track" style={{ transform: `translate3d(0, -${activeIndex * 100}dvh, 0)` }}>
+      <div ref={reelRef} className="feed-reels" aria-label="Interner Citrus-Feed" onScroll={updateActiveFromScroll}>
         {loading ? (
           <article className="feed-slide feed-slide-loading">
             <div className="feed-slide-gradient" />
@@ -243,49 +202,38 @@ export function Feed({
               <span className="feed-copy-skeleton skeleton-line" />
             </div>
           </article>
-          ) : movements.length ? (
-            <>
-            {movements.map((movement, index) => {
+        ) : movements.length ? (
+          movements.map((movement, index) => {
             const authorName = displayAuthorName(movement);
             const imageUrl = movementImageUrl(movement);
             const hideAuthor = shouldHideAuthorIdentity(movement);
             const menuOpen = menuMovementId === movement.id;
 
             return (
-              <article className={`feed-slide ${imageUrl ? "has-image" : "feed-slide-art"}`} key={movement.id} style={movementVisualStyle(movement)}>
+              <article
+                className={`feed-slide ${imageUrl ? "has-image" : "feed-slide-art"}`}
+                key={movement.id}
+                style={movementVisualStyle(movement)}
+                onPointerDown={startTap}
+                onPointerUp={(event) => finishTap(event, movement)}
+              >
                 {imageUrl ? (
-                  <img
-                    className="feed-slide-image"
-                    src={imageUrl}
-                    alt=""
-                    loading={index < 2 ? "eager" : "lazy"}
-                    decoding="async"
-                    onDoubleClick={() => likeFromImage(movement)}
-                    onPointerUp={(event) => {
-                      if (event.pointerType === "touch") handleImageTap(movement);
-                    }}
-                  />
+                  <img className="feed-slide-image" src={imageUrl} alt="" loading={index < 2 ? "eager" : "lazy"} decoding="async" />
                 ) : (
                   <div className="feed-slide-emoji" aria-hidden="true">{movement.emoji || "*"}</div>
                 )}
                 <div className="feed-slide-gradient" />
 
                 <div className="feed-action-rail" aria-label="Beitragsaktionen">
-                  <button
-                    className={`feed-action-button support ${movement.supportedByUser ? "active" : ""}`}
-                    type="button"
-                    onClick={() => onToggleSupport(movement.id)}
-                    aria-label="Unterstützen"
-                  >
-                    <Icon name="star" size={28} />
+                  <button className={`feed-action-button support ${movement.supportedByUser ? "active" : ""}`} type="button" onClick={() => onToggleSupport(movement.id)} aria-label="Unterstützen">
+                    <Icon name="thumbsUp" size={28} />
                     <span>{movement.supporters.toLocaleString("de-DE")}</span>
                   </button>
-                  <button
-                    className="feed-action-button"
-                    type="button"
-                    onClick={() => onOpenMovement(movement)}
-                    aria-label="Kommentare öffnen"
-                  >
+                  <button className={`feed-action-button dislike ${movement.dislikedByUser ? "active" : ""}`} type="button" onClick={() => onToggleDislike(movement.id)} aria-label="Dislike">
+                    <Icon name="thumbsDown" size={28} />
+                    <span>{(movement.dislikes ?? 0).toLocaleString("de-DE")}</span>
+                  </button>
+                  <button className="feed-action-button" type="button" onClick={() => onOpenMovement(movement)} aria-label="Details öffnen">
                     <Icon name="message" size={27} />
                     <span>Details</span>
                   </button>
@@ -298,13 +246,7 @@ export function Feed({
                     <span>Melden</span>
                   </button>
                   <div className="feed-more-wrap">
-                    <button
-                      className="feed-action-button"
-                      type="button"
-                      onClick={() => setMenuMovementId(menuOpen ? undefined : movement.id)}
-                      aria-label="Mehr Optionen"
-                      aria-expanded={menuOpen}
-                    >
+                    <button className="feed-action-button" type="button" onClick={() => setMenuMovementId(menuOpen ? undefined : movement.id)} aria-label="Mehr Optionen" aria-expanded={menuOpen}>
                       <Icon name="more" size={26} />
                     </button>
                     {menuOpen ? (
@@ -312,22 +254,16 @@ export function Feed({
                         <button type="button" onClick={() => onOpenMovement(movement)}>Beitrag öffnen</button>
                         <button type="button" onClick={() => copyMovementLink(movement)}>Link kopieren</button>
                         <button type="button" onClick={() => onOpenMovement(movement)}>Autor anzeigen</button>
-                        <button type="button" onClick={() => onOpenGroup(movement.groupId)}>Gruppe öffnen</button>
+                        <button type="button" onClick={() => chooseGroup(movement.groupId)}>Gruppe filtern</button>
                         <button type="button" onClick={() => onReport(movement)}>Melden</button>
                       </div>
                     ) : null}
                   </div>
                 </div>
 
-                <div
-                  className="feed-slide-content"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openFromContent(movement)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") onOpenMovement(movement);
-                  }}
-                >
+                <div className="feed-slide-content" role="button" tabIndex={0} onClick={() => openMovementFromTap(movement)} onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") onOpenMovement(movement);
+                }}>
                   <span className="feed-category">{movement.category}</span>
                   <h1>{movement.title}</h1>
                   <p className="feed-description">{movement.description}</p>
@@ -355,45 +291,28 @@ export function Feed({
                         ))}
                       </span>
                     ) : null}
-                    <span className="supporter-count">{movement.supporters.toLocaleString("de-DE")} Unterstützer</span>
-                    <button
-                      className="feed-group-pill"
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onOpenGroup(movement.groupId);
-                      }}
-                    >
+                    <span className="supporter-count">{voteLabel(movement.supporters)}</span>
+                    <button className="feed-group-pill" type="button" onClick={(event) => {
+                      event.stopPropagation();
+                      chooseGroup(movement.groupId);
+                    }}>
                       {movement.groupName}
                     </button>
                   </div>
                 </div>
               </article>
             );
-            })}
-            <article className="feed-slide feed-end-slide">
-              <div className="feed-slide-gradient" />
-              <div className="feed-slide-content">
-                <span className="feed-category">DU BIST DRAN</span>
-                <h1>Alles gesehen.</h1>
-                <p className="feed-description">Starte jetzt selbst einen Beitrag und bring dein Thema in Bewegung.</p>
-                <button className="feed-end-cta" type="button" onClick={onPlus}>
-                  Beitrag posten
-                </button>
-              </div>
-            </article>
-            </>
-          ) : (
+          })
+        ) : (
           <article className="feed-slide feed-empty-slide">
             <div className="feed-slide-gradient" />
             <div className="feed-slide-content">
               <span className="feed-category">CITRUS</span>
               <h1>Keine Beiträge gefunden.</h1>
-              <p>Für diesen Filter gibt es aktuell keine Bildbeiträge.</p>
+              <p>In deinen internen Gruppen gibt es aktuell keine Anliegen.</p>
             </div>
           </article>
         )}
-        </div>
       </div>
     </div>
   );

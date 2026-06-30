@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type PointerEvent } from "react";
 import type { Movement, Notification, UserStats } from "../types";
 import { Icon } from "../components/Icon";
+import { sortMovementsForUser } from "../lib/recommendations";
 
 type HomeTab = "for-you" | "trending" | "groups" | "supported";
 
@@ -19,13 +20,14 @@ type HomeProps = {
   onOpenNotifications: () => void;
   onPlus: () => void;
   onAuth: () => void;
+  onRefresh: () => Promise<void> | void;
 };
 
-const homeTabs: Array<{ id: HomeTab; label: string }> = [
-  { id: "for-you", label: "Für dich" },
-  { id: "trending", label: "Trending" },
-  { id: "groups", label: "Gruppen" },
-  { id: "supported", label: "Unterstützte" },
+const homeTabs: Array<{ id: HomeTab; label: string; title: string }> = [
+  { id: "for-you", label: "Für dich", title: "Wichtig für dich" },
+  { id: "trending", label: "Trending", title: "Themen mit Momentum" },
+  { id: "groups", label: "Gruppen", title: "Aus deinen Räumen" },
+  { id: "supported", label: "Unterstützte", title: "Von dir unterstützt" },
 ];
 
 function greeting() {
@@ -41,11 +43,13 @@ function supportPercent(movement: Movement, movements: Movement[]) {
   return Math.round((movement.supporters / maxSupporters) * 100);
 }
 
-function formatVotes(value: number) {
-  if (value >= 1000) {
-    return `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 }).format(value / 1000)}k`;
-  }
+function formatCompact(value: number) {
+  if (value >= 1000) return `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 }).format(value / 1000)}k`;
   return value.toLocaleString("de-DE");
+}
+
+function voteLabel(value: number) {
+  return `${formatCompact(value)} ${value === 1 ? "Stimme" : "Stimmen"}`;
 }
 
 function sparklinePath(values: number[], width = 92, height = 34) {
@@ -61,10 +65,16 @@ function sparklinePath(values: number[], width = 92, height = 34) {
     .join(" ");
 }
 
+function tabSource(tab: HomeTab, movements: Movement[], trending: Movement[]) {
+  if (tab === "trending") return trending.filter((movement) => (movement.trendingScore ?? 0) > 0 || movement.supporters > 0);
+  if (tab === "groups") return movements.filter((movement) => movement.scope === "internal");
+  if (tab === "supported") return movements.filter((movement) => movement.supportedByUser);
+  return movements;
+}
+
 export function Home({
   userName,
   isAuthenticated,
-  stats,
   movements,
   notifications,
   loading,
@@ -75,33 +85,84 @@ export function Home({
   onOpenNotifications,
   onPlus,
   onAuth,
+  onRefresh,
 }: HomeProps) {
   const [activeHomeTab, setActiveHomeTab] = useState<HomeTab>("for-you");
+  const [pullDistance, setPullDistance] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshed, setRefreshed] = useState(false);
+  const pullStart = useRef<{ y: number; active: boolean } | null>(null);
   const unreadCount = notifications.filter((notification) => !notification.isRead).length;
 
   const trending = useMemo(
-    () => [...movements].sort((a, b) => (b.trendingScore ?? 0) - (a.trendingScore ?? 0)),
+    () =>
+      sortMovementsForUser(movements, {
+        membershipGroupIds: movements.map((movement) => movement.groupId),
+        mode: "trending",
+      }),
     [movements],
   );
 
-  const topMovement = trending[0];
   const visibleTopics = useMemo(() => {
-    const source =
-      activeHomeTab === "trending"
-        ? trending
-        : activeHomeTab === "groups"
-          ? movements.filter((movement) => Boolean(movement.groupId))
-          : activeHomeTab === "supported"
-            ? movements.filter((movement) => movement.supportedByUser)
-            : movements;
-
-    return [...source]
-      .sort((a, b) => (b.trendingScore ?? 0) + b.supporters - ((a.trendingScore ?? 0) + a.supporters))
-      .slice(0, 4);
+    const source = tabSource(activeHomeTab, movements, trending);
+    return sortMovementsForUser(source, {
+      membershipGroupIds: movements.map((movement) => movement.groupId),
+      supportedGroupIds: movements.filter((movement) => movement.supportedByUser).map((movement) => movement.groupId),
+      interactedCategories: movements.filter((movement) => movement.supportedByUser).map((movement) => movement.category),
+      mode: activeHomeTab === "trending" ? "trending" : activeHomeTab === "groups" ? "groups" : activeHomeTab === "supported" ? "supported" : "for-you",
+    }).slice(0, 5);
   }, [activeHomeTab, movements, trending]);
 
+  const activeTabInfo = homeTabs.find((tab) => tab.id === activeHomeTab) ?? homeTabs[0];
+  const featuredMovement = activeHomeTab === "groups" ? undefined : visibleTopics[0];
+
+  function startPull(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "mouse") return;
+    const container = event.currentTarget.closest(".screen-content") as HTMLElement | null;
+    if ((container?.scrollTop ?? window.scrollY) > 2) return;
+    pullStart.current = { y: event.clientY, active: true };
+  }
+
+  function movePull(event: PointerEvent<HTMLDivElement>) {
+    const start = pullStart.current;
+    if (!start?.active || refreshing) return;
+    const distance = event.clientY - start.y;
+    if (distance <= 0) return;
+    setPullDistance(Math.min(96, distance * 0.55));
+  }
+
+  async function endPull() {
+    const shouldRefresh = pullDistance > 58;
+    pullStart.current = null;
+    if (!shouldRefresh) {
+      setPullDistance(0);
+      return;
+    }
+    setRefreshing(true);
+    setPullDistance(72);
+    try {
+      await onRefresh();
+      setRefreshed(true);
+      window.setTimeout(() => setRefreshed(false), 1600);
+    } finally {
+      setRefreshing(false);
+      setPullDistance(0);
+    }
+  }
+
   return (
-    <div className="screen home-screen">
+    <div
+      className="screen home-screen"
+      onPointerDown={startPull}
+      onPointerMove={movePull}
+      onPointerUp={endPull}
+      onPointerCancel={endPull}
+    >
+      <div className={`home-pull-refresh ${pullDistance > 4 || refreshing ? "visible" : ""}`} style={{ transform: `translateY(${pullDistance}px)` }}>
+        <span className={refreshing ? "spinning" : ""}>C</span>
+        <small>{refreshing ? "Aktualisiere" : refreshed ? "Aktualisiert" : "Zum Aktualisieren ziehen"}</small>
+      </div>
+
       <header className="reference-home-header">
         <div className="home-top-actions">
           <button className="home-round-button" type="button" onClick={onPlus} aria-label="Beitrag erstellen">
@@ -129,7 +190,7 @@ export function Home({
 
         <button className="reference-search" type="button" onClick={onOpenSearch}>
           <Icon name="search" size={25} />
-          <span>Suche nach Themen, Ideen oder Gruppen</span>
+          <span>Themen oder Gruppen suchen</span>
           <Icon name="chevronRight" size={25} />
         </button>
 
@@ -149,27 +210,27 @@ export function Home({
 
       {error ? (
         <section className="soft-note">
-          <strong>Supabase-Konfiguration prüfen.</strong>
+          <strong>Verbindung prüfen.</strong>
           <span>{error}</span>
         </section>
       ) : null}
 
-      {topMovement ? (
-        <article className={`trending-feature ${topMovement.imageUrl ? "has-image" : "no-image"}`}>
-          {topMovement.imageUrl ? <img src={topMovement.imageUrl} alt="" /> : null}
+      {featuredMovement ? (
+        <article className={`trending-feature ${featuredMovement.imageUrl ? "has-image" : "no-image"}`} key={`${activeHomeTab}-${featuredMovement.id}`}>
+          {featuredMovement.imageUrl ? <img src={featuredMovement.imageUrl} alt="" /> : null}
           <div className="trending-overlay" />
           <div className="trending-content">
-            <span className="trending-chip">TRENDING</span>
-            <h2>{topMovement.title}</h2>
+            <span className="trending-chip">{activeHomeTab === "supported" ? "UNTERSTÜTZT" : activeHomeTab === "trending" ? "TRENDING" : "HEUTE"}</span>
+            <h2>{featuredMovement.title}</h2>
             <div className="trending-stats">
-              <span>{supportPercent(topMovement, movements)}% Unterstützung</span>
-              <span>{formatVotes(topMovement.supporters)} Stimmen</span>
+              <span>{supportPercent(featuredMovement, movements)} % Unterstützung</span>
+              <span>{voteLabel(featuredMovement.supporters)}</span>
             </div>
             <div className="trending-footer">
               <div className="support-progress" aria-hidden="true">
-                <span style={{ width: `${supportPercent(topMovement, movements)}%` }} />
+                <span style={{ width: `${supportPercent(featuredMovement, movements)}%` }} />
               </div>
-              <button type="button" onClick={() => onOpenMovement(topMovement)} aria-label="Trending-Thema öffnen">
+              <button type="button" onClick={() => onOpenMovement(featuredMovement)} aria-label="Thema öffnen">
                 <Icon name="arrowUpRight" size={34} />
               </button>
             </div>
@@ -178,15 +239,20 @@ export function Home({
       ) : loading ? (
         <section className="trending-feature loading-card">
           <div className="trending-content">
-            <span className="trending-chip">TRENDING</span>
-            <h2>Lade echte Themen...</h2>
+            <span className="trending-chip">CITRUS</span>
+            <h2>Lade Themen...</h2>
           </div>
+        </section>
+      ) : activeHomeTab === "groups" ? (
+        <section className="home-tab-note">
+          <strong>Gruppenansicht</strong>
+          <span>Hier zählen Themen aus deinen Räumen. Öffne den Feed, um nach Gruppe zu filtern.</span>
         </section>
       ) : null}
 
-      <section className="top-topics-section">
+      <section className="top-topics-section" key={activeHomeTab}>
         <div className="reference-section-title">
-          <h2>Top Themen</h2>
+          <h2>{activeTabInfo.title}</h2>
           <button type="button" onClick={onOpenFeed}>
             Alle anzeigen
             <Icon name="chevronRight" size={18} />
@@ -212,20 +278,20 @@ export function Home({
                   </div>
                   <div className="topic-copy">
                     <strong>{movement.title}</strong>
-                    <span>{formatVotes(movement.supporters)} Stimmen</span>
+                    <span>{voteLabel(movement.supporters)}</span>
                   </div>
                   <svg className="topic-sparkline" viewBox="0 0 92 34" aria-hidden="true">
                     {path ? <path d={path} /> : null}
                   </svg>
-                  <em>{percent}%</em>
+                  <em>{percent} %</em>
                 </button>
               );
             })}
           </div>
         ) : (
           <div className="empty-state">
-            <strong>Noch keine echten Themen vorhanden.</strong>
-            <span>Neue Beiträge erscheinen hier, sobald sie in Supabase gespeichert sind.</span>
+            <strong>{activeHomeTab === "supported" ? "Noch nichts unterstützt." : "Noch keine Themen vorhanden."}</strong>
+            <span>{activeHomeTab === "supported" ? "Stimme für ein Anliegen, damit es hier erscheint." : "Neue Beiträge erscheinen hier, sobald sie gespeichert sind."}</span>
             {!isAuthenticated ? (
               <button className="hero-login" type="button" onClick={onAuth}>
                 Anmelden

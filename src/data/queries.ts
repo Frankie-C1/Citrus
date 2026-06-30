@@ -61,6 +61,14 @@ type SupportRow = {
   created_at: string | null;
 };
 
+type ReactionRow = {
+  id: string;
+  movement_id: string;
+  user_id: string | null;
+  reaction_type: "dislike";
+  created_at: string | null;
+};
+
 type UpdateRow = {
   id: string;
   movement_id: string;
@@ -209,7 +217,7 @@ function mapNotificationPreferences(row?: NotificationPreferencesRow | null): No
 }
 
 function accentForScope(scope: Scope) {
-  return scope === "external" ? "#22C55E" : "#111111";
+  return scope === "external" ? "#6B7280" : "#111111";
 }
 
 function fallbackEmoji(type: MovementType, category?: string) {
@@ -305,7 +313,7 @@ export async function fetchGroups() {
   const { data, error } = await supabase
     .from("groups")
     .select("id,name,category,scope,icon,logo_url,description,invite_code")
-    .order("scope", { ascending: true })
+    .eq("scope", "internal")
     .order("name", { ascending: true });
 
   if (error) {
@@ -321,6 +329,7 @@ export async function fetchMovements(userId?: string | null) {
   const { data: movementRows, error: movementError } = await supabase
     .from("movements")
     .select("id,title,description,type,status,group_id,user_id,scope,emoji,image_url,background_type,background_value,is_anonymous,category,report_count,created_at")
+    .eq("scope", "internal")
     .order("created_at", { ascending: false });
 
   if (movementError) {
@@ -335,11 +344,12 @@ export async function fetchMovements(userId?: string | null) {
   const movementIds = movements.map((movement) => movement.id);
   const authorIds = [...new Set(movements.map((movement) => movement.user_id).filter(Boolean))] as string[];
 
-  const [groupsResult, supportsResult, updatesResult, profilesResult] = await Promise.all([
+  const [groupsResult, supportsResult, reactionsResult, updatesResult, profilesResult] = await Promise.all([
     groupIds.length
       ? supabase.from("groups").select("id,name,category,scope,icon,logo_url,description,invite_code").in("id", groupIds)
       : Promise.resolve({ data: [], error: null }),
     supabase.from("supports").select("id,movement_id,user_id,created_at").in("movement_id", movementIds),
+    supabase.from("movement_reactions").select("id,movement_id,user_id,reaction_type,created_at").eq("reaction_type", "dislike").in("movement_id", movementIds),
     supabase.from("movement_updates").select("id,movement_id,body,created_at").in("movement_id", movementIds),
     authorIds.length
       ? supabase.from("profiles").select("id,email,username,display_name,avatar_url,role").in("id", authorIds)
@@ -348,10 +358,12 @@ export async function fetchMovements(userId?: string | null) {
 
   if (groupsResult.error) logSupabaseError("fetchMovements groups partial failure", groupsResult.error);
   if (supportsResult.error) logSupabaseError("fetchMovements supports partial failure", supportsResult.error);
+  if (reactionsResult.error && !isMissingOptionalTable(reactionsResult.error)) logSupabaseError("fetchMovements reactions partial failure", reactionsResult.error);
   if (updatesResult.error) logSupabaseError("fetchMovements updates partial failure", updatesResult.error);
   if (profilesResult.error) logSupabaseError("fetchMovements profiles partial failure", profilesResult.error);
 
   const supportRows = (supportsResult.data ?? []) as SupportRow[];
+  const reactionRows = reactionsResult.error ? [] : ((reactionsResult.data ?? []) as ReactionRow[]);
   const supporterIds = [...new Set(supportRows.map((support) => support.user_id).filter(Boolean))] as string[];
   const supporterProfilesResult = supporterIds.length
     ? await supabase.from("profiles").select("id,email,username,display_name,avatar_url,role").in("id", supporterIds)
@@ -368,10 +380,15 @@ export async function fetchMovements(userId?: string | null) {
     ].map((profile) => [profile.id, profile]),
   );
   const supportsByMovement = new Map<string, SupportRow[]>();
+  const dislikesByMovement = new Map<string, ReactionRow[]>();
   const updatesByMovement = new Map<string, UpdateRow[]>();
 
   for (const support of supportRows) {
     supportsByMovement.set(support.movement_id, [...(supportsByMovement.get(support.movement_id) ?? []), support]);
+  }
+
+  for (const reaction of reactionRows) {
+    dislikesByMovement.set(reaction.movement_id, [...(dislikesByMovement.get(reaction.movement_id) ?? []), reaction]);
   }
 
   for (const update of ((updatesResult.data ?? []) as UpdateRow[])) {
@@ -385,11 +402,13 @@ export async function fetchMovements(userId?: string | null) {
   return movements.map((movement): Movement => {
     const group = movement.group_id ? groupsById.get(movement.group_id) : undefined;
     const supports = supportsByMovement.get(movement.id) ?? [];
+    const dislikes = dislikesByMovement.get(movement.id) ?? [];
     const updates = updatesByMovement.get(movement.id) ?? [];
     const author = movement.user_id ? profilesById.get(movement.user_id) : undefined;
     const isAnonymous = Boolean(movement.is_anonymous);
     const category = movement.category || group?.category || "Allgemein";
     const userSupport = userId ? supports.find((support) => support.user_id === userId) : undefined;
+    const userDislike = userId ? dislikes.find((reaction) => reaction.user_id === userId) : undefined;
     const supporterPreviews = supports
       .slice()
       .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())
@@ -419,11 +438,12 @@ export async function fetchMovements(userId?: string | null) {
       backgroundType: movement.background_type ?? (movement.image_url ? "image" : "emoji"),
       backgroundValue: movement.background_value ?? movement.image_url ?? null,
       groupId: movement.group_id ?? "",
-      groupName: group?.name ?? "Öffentlich",
+      groupName: group?.name ?? "Interne Gruppe",
       groupIcon: group?.icon,
-      scope: movement.scope ?? group?.scope ?? "external",
+      scope: movement.scope ?? group?.scope ?? "internal",
       type: movement.type,
       supporters: supports.length,
+      dislikes: dislikes.length,
       weeklyGrowth,
       status: movement.status,
       category,
@@ -438,6 +458,7 @@ export async function fetchMovements(userId?: string | null) {
             : "Heute",
       })),
       supportedByUser: Boolean(userSupport),
+      dislikedByUser: Boolean(userDislike),
       userSupportCreatedAt: userSupport?.created_at ?? undefined,
       userId: movement.user_id,
       authorUsername: isAnonymous ? "Anonym" : author?.username,
@@ -510,6 +531,19 @@ export async function addSupport(movementId: string, userId: string) {
   }
 }
 
+export async function addDislike(movementId: string, userId: string) {
+  requireSupabase();
+  const { error } = await supabase.from("movement_reactions").insert({
+    movement_id: movementId,
+    user_id: userId,
+    reaction_type: "dislike",
+  });
+  if (error && error.code !== "23505") {
+    logSupabaseError("addDislike failed", error);
+    throw error;
+  }
+}
+
 export async function createMovementUpdate(movementId: string, userId: string, text: string) {
   requireSupabase();
   const { error } = await supabase.from("movement_updates").insert({
@@ -528,6 +562,19 @@ export async function removeSupport(movementId: string, userId: string) {
   const { error } = await supabase.from("supports").delete().match({ movement_id: movementId, user_id: userId });
   if (error) {
     logSupabaseError("removeSupport failed", error);
+    throw error;
+  }
+}
+
+export async function removeDislike(movementId: string, userId: string) {
+  requireSupabase();
+  const { error } = await supabase.from("movement_reactions").delete().match({
+    movement_id: movementId,
+    user_id: userId,
+    reaction_type: "dislike",
+  });
+  if (error) {
+    logSupabaseError("removeDislike failed", error);
     throw error;
   }
 }

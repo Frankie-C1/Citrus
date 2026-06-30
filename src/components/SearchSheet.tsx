@@ -21,7 +21,8 @@ export function SearchSheet({ open, movements, onClose, onOpenMovement }: Search
   const [dragY, setDragY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const dragStartY = useRef(0);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const dragStart = useRef<{ x: number; y: number; scrollTop: number } | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -60,28 +61,37 @@ export function SearchSheet({ open, movements, onClose, onOpenMovement }: Search
     onOpenMovement(movement);
   }
 
-  function startDrag(event: PointerEvent<HTMLButtonElement>) {
-    if (!open) return;
-    dragStartY.current = event.clientY;
+  function isInteractiveTarget(target: EventTarget | null) {
+    const element = target instanceof HTMLElement ? target : null;
+    if (element?.closest(".search-sheet-handle")) return false;
+    if (element?.closest(".search-sheet-header") && !element.closest("button, a, input, textarea, select")) return false;
+    return Boolean(element?.closest("input, textarea, select, button, a"));
+  }
+
+  function startDrag(event: PointerEvent<HTMLElement>) {
+    if (!open || isInteractiveTarget(event.target)) return;
+    dragStart.current = { x: event.clientX, y: event.clientY, scrollTop: resultsRef.current?.scrollTop ?? 0 };
     setIsDragging(true);
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
-  function moveDrag(event: PointerEvent<HTMLButtonElement>) {
-    if (!isDragging) return;
-    setDragY(Math.max(0, event.clientY - dragStartY.current));
+  function moveDrag(event: PointerEvent<HTMLElement>) {
+    const start = dragStart.current;
+    if (!isDragging || !start) return;
+    const deltaY = event.clientY - start.y;
+    const deltaX = Math.abs(event.clientX - start.x);
+    if (deltaY <= 0 || deltaX > deltaY * 1.25 || start.scrollTop > 0) return;
+    setDragY(Math.max(0, deltaY));
   }
 
-  function endDrag(event: PointerEvent<HTMLButtonElement>) {
+  function endDrag(event: PointerEvent<HTMLElement>) {
     if (!isDragging) return;
     event.currentTarget.releasePointerCapture(event.pointerId);
     setIsDragging(false);
-    if (dragY > 44) {
-      setDragY(0);
-      onClose();
-      return;
-    }
+    const shouldClose = dragY > 76;
     setDragY(0);
+    dragStart.current = null;
+    if (shouldClose) onClose();
   }
 
   const sheetStyle = {
@@ -90,22 +100,23 @@ export function SearchSheet({ open, movements, onClose, onOpenMovement }: Search
 
   return (
     <>
-      <div className={`search-sheet-backdrop ${open ? "open" : ""}`} onClick={onClose} />
+      <div
+        className={`search-sheet-backdrop ${open ? "open" : ""}`}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) onClose();
+        }}
+      />
       <aside
         className={`search-sheet ${open ? "open" : ""} ${isDragging ? "dragging" : ""}`}
         aria-hidden={!open}
         style={sheetStyle}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
       >
-        <button
-          className="search-sheet-handle"
-          type="button"
-          aria-label="Suche herunterziehen"
-          onPointerDown={startDrag}
-          onPointerMove={moveDrag}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-          onLostPointerCapture={endDrag}
-        />
+        <button className="search-sheet-handle" type="button" aria-label="Suche herunterziehen" />
         <div className="search-sheet-header">
           <div>
             <span>Suchen</span>
@@ -126,7 +137,7 @@ export function SearchSheet({ open, movements, onClose, onOpenMovement }: Search
           />
         </label>
 
-        <div className="search-sheet-results">
+        <div className="search-sheet-results" ref={resultsRef}>
           {results.length ? (
             results.map((movement) => (
               <button

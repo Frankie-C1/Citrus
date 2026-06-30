@@ -14,7 +14,7 @@ export function Groups({ groups, onBack, onOpenGroup }: GroupsProps) {
         Zurück
       </button>
       <header>
-        <span className="eyebrow">Intern und extern</span>
+        <span className="eyebrow">Interne Räume und Einladungscodes</span>
         <h1>Gruppen</h1>
       </header>
 
@@ -25,7 +25,7 @@ export function Groups({ groups, onBack, onOpenGroup }: GroupsProps) {
             <span>
               <strong>{group.name}</strong>
               <small>
-                {group.category} · {group.scope === "internal" ? "Intern" : "Öffentlich"}
+                {group.category} · Intern
               </small>
             </span>
           </button>
