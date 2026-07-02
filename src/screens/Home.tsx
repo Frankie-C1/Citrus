@@ -26,7 +26,7 @@ type HomeProps = {
 const homeTabs: Array<{ id: HomeTab; label: string; title: string }> = [
   { id: "for-you", label: "Für dich", title: "Wichtig für dich" },
   { id: "trending", label: "Trending", title: "Themen mit Momentum" },
-  { id: "groups", label: "Gruppen", title: "Aus deinen Räumen" },
+  { id: "groups", label: "Gruppen", title: "Deine Gruppen" },
   { id: "supported", label: "Unterstützte", title: "Von dir unterstützt" },
 ];
 
@@ -158,9 +158,12 @@ export function Home({
       onPointerUp={endPull}
       onPointerCancel={endPull}
     >
-      <div className={`home-pull-refresh ${pullDistance > 4 || refreshing ? "visible" : ""}`} style={{ transform: `translateY(${pullDistance}px)` }}>
-        <span className={refreshing ? "spinning" : ""}>C</span>
-        <small>{refreshing ? "Aktualisiere" : refreshed ? "Aktualisiert" : "Zum Aktualisieren ziehen"}</small>
+      <div
+        className={`home-pull-refresh ${pullDistance > 4 || refreshing ? "visible" : ""}`}
+        style={{ transform: `translateY(${pullDistance}px)` }}
+        aria-hidden="true"
+      >
+        <span className={refreshing || pullDistance > 4 ? "spinning" : ""} />
       </div>
 
       <header className="reference-home-header">
@@ -246,7 +249,7 @@ export function Home({
       ) : activeHomeTab === "groups" ? (
         <section className="home-tab-note">
           <strong>Gruppenansicht</strong>
-          <span>Hier zählen Themen aus deinen Räumen. Öffne den Feed, um nach Gruppe zu filtern.</span>
+          <span>Hier siehst du Themen aus deinen Räumen. Öffne die Übersicht, um nach Gruppe zu filtern.</span>
         </section>
       ) : null}
 

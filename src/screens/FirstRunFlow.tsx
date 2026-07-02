@@ -8,20 +8,20 @@ type FirstRunFlowProps = {
 
 const firstRunSlides = [
   {
-    title: "Gib deiner Stimme Gewicht.",
-    text: "Teile Anliegen, die gesehen werden sollen. Andere können sie unterstützen und sichtbar machen, was wirklich zählt.",
+    title: "Posten",
+    text: "Teile deine Ideen und Vorschläge mit deiner Gruppe. Mit der Plustaste geht das ziemlich schnell.",
   },
   {
-    title: "Stimme täglich ab.",
-    text: "Citrus ist für kurze tägliche Beteiligung gemacht: Unterstütze Themen, verfolge Trends und sieh, was an Bedeutung gewinnt.",
+    title: "Abstimmen",
+    text: "Unterstütze mit deinem Daumen hoch täglich die Beiträge aus deiner Gruppe.",
   },
   {
-    title: "Räume für echte Gruppen.",
-    text: "Interne Räume funktionieren für Uni, Gemeinde, Firma oder Community. Einladungscodes bringen Menschen in den richtigen Raum.",
+    title: "Beschweren",
+    text: "Bringe deine Anliegen durch einen Beitrag dazu gehört zu werden.",
   },
   {
     title: "Gestalte Citrus mit.",
-    text: "Zum Start kannst du in die Citrus-Gruppe. Dort sammelst du Feedback, meldest Fehler und hilfst, die App besser zu machen.",
+    text: "Zum Start laden wir dich in die Citrus-Gruppe ein. Dort kannst du gerne jederzeit alle Ideen rund um die App posten.",
   },
 ];
 
@@ -61,7 +61,7 @@ export function FirstRunFlow({ onJoinCitrus }: FirstRunFlowProps) {
           <form className="first-run-card final" onSubmit={submit}>
             <span className="first-run-kicker">Citrus-Testgruppe</span>
             <h1>Starte im Citrus-Raum.</h1>
-            <p>Der Code ist vorausgefüllt. Du kannst beitreten, um Feedback zu geben und Citrus mitzuverbessern.</p>
+            <p>Der Code ist bereits vorausgefüllt. Du kannst beitreten, um uns Feedback zu geben und helfen Citrus mitzuverbessern.</p>
             <label>
               Gruppencode
               <input

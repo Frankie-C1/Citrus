@@ -1,5 +1,6 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import type { Group, Movement, UserStats } from "../types";
+import { GroupVisual } from "../components/GroupVisual";
 import { Icon } from "../components/Icon";
 import { SectionHeader } from "../components/SectionHeader";
 import { StatCard } from "../components/StatCard";
@@ -150,7 +151,7 @@ export function Insights({
               <div className="posts-group-grid">
                 {groups.map((group) => (
                   <button className="posts-group-card" type="button" key={group.id} onClick={() => setSelectedGroupId(group.id)}>
-                    <span>{group.logoUrl ? <img src={group.logoUrl} alt="" /> : group.name.slice(0, 1).toUpperCase()}</span>
+                    <GroupVisual group={group} />
                     <strong>{group.name}</strong>
                     <small>{group.category}</small>
                   </button>
@@ -209,6 +210,7 @@ function PostGrid({
 
 function StatsView({ stats }: { stats: UserStats }) {
   const max = Math.max(...stats.weeklyReach, 1);
+  const hasWeeklyActivity = stats.weeklyReach.some((value) => value > 0);
   const progress = Math.min(92, Math.max(18, stats.supportedTopics * 9 + stats.ownMovements * 12));
 
   return (
@@ -235,15 +237,19 @@ function StatsView({ stats }: { stats: UserStats }) {
 
       <section className="weekly-chart">
         <SectionHeader title="Wochenverlauf" />
-        <div className="bar-row">
-          {stats.weeklyReach.map((value, index) => (
-            <span
-              key={`${value}-${index}`}
-              style={{ height: `${Math.max(24, (value / max) * 112)}px` }}
-              aria-label={`${value} Bewegungen`}
-            />
-          ))}
-        </div>
+        {hasWeeklyActivity ? (
+          <div className="bar-row">
+            {stats.weeklyReach.map((value, index) => (
+              <span
+                key={`${value}-${index}`}
+                style={{ height: `${value ? Math.max(8, (value / max) * 112) : 0}px` }}
+                aria-label={`${value} Aktivitäten`}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="posts-empty-state compact">Noch keine Aktivität diese Woche</div>
+        )}
       </section>
     </div>
   );

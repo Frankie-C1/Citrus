@@ -12,19 +12,22 @@ type OnboardingProps = {
 
 const onboardingSlides = [
   {
+    id: "voice-weight",
     image: saxophoneImage,
     title: "Gib deiner Stimme Gewicht.",
-    text: "Teile Anliegen, die gesehen werden sollen. Citrus macht sichtbar, was Menschen wirklich bewegt.",
+    text: "Hattest du schonmal eine gute Idee und wusstest nicht wohin damit? Citrus ist genau der Ort für Denker wie dich.",
   },
   {
+    id: "daily-vote",
     image: hummingbirdImage,
     title: "Stimme täglich für Themen.",
-    text: "Unterstütze Anliegen, die dir wichtig sind, und sieh, welche Themen in deinen Gruppen wachsen.",
+    text: "Unterstütze Anliegen, die dir wichtig sind, und sieh, welche Themen in deinen persönlichen Gruppen wachsen.",
   },
   {
+    id: "real-ideas",
     image: starsImage,
-    title: "Räume für echte Beteiligung.",
-    text: "Interne Gruppen für Uni, Gemeinde, Firma oder Community. Zum Start bist du in der Citrus-Gruppe dabei.",
+    title: "Entdecke echte Ideen.",
+    text: "Und teile Anliegen, die gesehen werden sollten. Citrus macht sichtbar, was Menschen wirklich bewegt.",
   },
 ];
 
@@ -76,7 +79,7 @@ export function Onboarding({ onAuthenticated }: OnboardingProps) {
           className="onboarding-auth-image"
           src={isAuthStep ? cityLoginImage : currentSlide.image}
           alt=""
-          key={isAuthStep ? "auth" : currentSlide.title}
+          key={isAuthStep ? "auth-image" : `image-${currentSlide.id}`}
         />
         <div className="onboarding-auth-overlay" />
         <div className="onboarding-auth-brand">
@@ -161,7 +164,7 @@ export function Onboarding({ onAuthenticated }: OnboardingProps) {
             </form>
           </div>
         ) : (
-          <div className="onboarding-auth-content" key={currentSlide.title}>
+          <div className="onboarding-auth-content" key={`content-${currentSlide.id}`}>
             <h1>{currentSlide.title}</h1>
             <p>{currentSlide.text}</p>
           </div>
@@ -171,7 +174,7 @@ export function Onboarding({ onAuthenticated }: OnboardingProps) {
           <footer className="onboarding-auth-nav">
             <div className="onboarding-auth-dots" aria-label={`${step + 1} von ${onboardingSlides.length}`}>
               {onboardingSlides.map((slide, index) => (
-                <span className={index === step ? "active" : ""} key={slide.title} />
+                <span className={index === step ? "active" : ""} key={slide.id} />
               ))}
             </div>
             <button type="button" onClick={() => setStep((current) => current + 1)}>

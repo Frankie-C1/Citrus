@@ -28,6 +28,7 @@ export function MovementReelCard({
   const groupVisual = {
     name: movement.groupName,
     icon: movement.groupIcon,
+    logoUrl: movement.groupLogoUrl,
     scope: movement.scope,
     category: movement.category,
     accent: movement.scope === "external" ? "#22c55e" : "#111111",

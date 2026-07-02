@@ -1,17 +1,20 @@
 import { isSupabaseConfigured, supabase, getSupabaseConfigError } from "../lib/supabase";
 import type {
   AdminUserResult,
+  AdminGroupInput,
   BackgroundType,
   CreateMovementInput,
   FeedbackInput,
   FeedPreferences,
   Group,
+  GroupAdmin,
   GroupMembership,
   ModerationSummary,
   Movement,
   MovementStatus,
   MovementType,
   Notification,
+  NotificationDetail,
   NotificationFrequency,
   NotificationPreferences,
   PrivacyVisibility,
@@ -73,6 +76,7 @@ type UpdateRow = {
   id: string;
   movement_id: string;
   body: string;
+  status: MovementStatus | null;
   created_at: string | null;
 };
 
@@ -117,6 +121,14 @@ type MembershipRow = {
   role: "member" | "admin";
   joined_at: string | null;
   groups: GroupRow | GroupRow[] | null;
+};
+
+type GroupAdminRow = {
+  id: string;
+  group_id: string;
+  user_id: string;
+  created_at: string | null;
+  profiles: ProfileLiteRow | ProfileLiteRow[] | null;
 };
 
 type UserSettingsRow = {
@@ -440,6 +452,7 @@ export async function fetchMovements(userId?: string | null) {
       groupId: movement.group_id ?? "",
       groupName: group?.name ?? "Interne Gruppe",
       groupIcon: group?.icon,
+      groupLogoUrl: group?.logo_url,
       scope: movement.scope ?? group?.scope ?? "internal",
       type: movement.type,
       supporters: supports.length,
@@ -593,16 +606,26 @@ export async function fetchGroupMemberships(userId?: string | null): Promise<Gro
   requireSupabase();
   if (!userId) return [];
 
-  const { data, error } = await supabase
+  const [{ data, error }, groupAdminsResult] = await Promise.all([
+    supabase
     .from("group_members")
     .select("id,group_id,user_id,role,joined_at,groups:group_id(id,name,category,scope,icon,logo_url,description,invite_code)")
     .eq("user_id", userId)
-    .order("joined_at", { ascending: false });
+      .order("joined_at", { ascending: false }),
+    supabase.from("group_admins").select("group_id").eq("user_id", userId),
+  ]);
 
   if (error) {
     logSupabaseError("fetchGroupMemberships failed", error);
     throw error;
   }
+  if (groupAdminsResult.error && !isMissingOptionalTable(groupAdminsResult.error)) {
+    logSupabaseError("fetchGroupMemberships group_admins optional failure", groupAdminsResult.error);
+  }
+
+  const groupAdminIds = new Set(
+    groupAdminsResult.error ? [] : ((groupAdminsResult.data ?? []) as Array<{ group_id: string }>).map((row) => row.group_id),
+  );
 
   return ((data ?? []) as unknown as MembershipRow[])
     .map((row) => {
@@ -612,7 +635,7 @@ export async function fetchGroupMemberships(userId?: string | null): Promise<Gro
         id: row.id,
         groupId: row.group_id,
         userId: row.user_id,
-        role: row.role,
+        role: groupAdminIds.has(row.group_id) ? "group_admin" : row.role,
         joinedAt: row.joined_at ?? "",
         group: mapGroup(group),
       } satisfies GroupMembership;
@@ -986,31 +1009,135 @@ export async function reportMovement(movementId: string, userId: string, reason:
   }
 }
 
-export async function createGroup(input: {
-  name: string;
-  category: string;
-  scope: Scope;
-  icon?: string;
-  logoUrl?: string;
-  description?: string;
-  inviteCode?: string;
-  createdBy: string;
-}) {
+function mapGroupAdmin(row: GroupAdminRow): GroupAdmin {
+  const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+  return {
+    id: row.id,
+    groupId: row.group_id,
+    userId: row.user_id,
+    createdAt: row.created_at ?? undefined,
+    username: profile?.username ?? "",
+    displayName: profile?.display_name ?? profile?.username ?? "Nutzer",
+    email: profile?.email ?? "",
+    avatarUrl: profile?.avatar_url,
+  };
+}
+
+export async function fetchGroupAdmins(groupIds?: string[]): Promise<GroupAdmin[]> {
   requireSupabase();
-  const { error } = await supabase.from("groups").insert({
-    name: input.name,
+  let query = supabase
+    .from("group_admins")
+    .select("id,group_id,user_id,created_at,profiles:user_id(id,email,username,display_name,avatar_url,role)")
+    .order("created_at", { ascending: true });
+
+  if (groupIds?.length) query = query.in("group_id", groupIds);
+
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingOptionalTable(error)) return [];
+    logSupabaseError("fetchGroupAdmins failed", error);
+    throw error;
+  }
+  return ((data ?? []) as unknown as GroupAdminRow[]).map(mapGroupAdmin);
+}
+
+export async function addGroupAdmin(groupId: string, userId: string, createdBy: string) {
+  requireSupabase();
+  const memberInsert = await supabase.from("group_members").insert({ group_id: groupId, user_id: userId, role: "member" });
+  if (memberInsert.error && memberInsert.error.code !== "23505") {
+    logSupabaseError("addGroupAdmin member insert failed", memberInsert.error);
+    throw memberInsert.error;
+  }
+  const { error } = await supabase.from("group_admins").insert({ group_id: groupId, user_id: userId, created_by: createdBy });
+  if (error && error.code !== "23505") {
+    logSupabaseError("addGroupAdmin failed", error);
+    throw error;
+  }
+}
+
+export async function removeGroupAdmin(groupId: string, userId: string) {
+  requireSupabase();
+  const { error } = await supabase.from("group_admins").delete().match({ group_id: groupId, user_id: userId });
+  if (error) {
+    logSupabaseError("removeGroupAdmin failed", error);
+    throw error;
+  }
+}
+
+export async function removeGroupMember(groupId: string, userId: string) {
+  requireSupabase();
+  const { error } = await supabase.from("group_members").delete().match({ group_id: groupId, user_id: userId });
+  if (error) {
+    logSupabaseError("removeGroupMember failed", error);
+    throw error;
+  }
+}
+
+export async function createGroup(input: AdminGroupInput & { scope?: Scope; createdBy: string }) {
+  requireSupabase();
+  const inviteCode = input.inviteCode.trim().toUpperCase();
+  const { data, error } = await supabase.from("groups").insert({
+    name: input.name.trim(),
     category: input.category,
-    scope: input.scope,
+    scope: input.scope ?? "internal",
     icon: input.icon || input.name.slice(0, 2).toUpperCase(),
     logo_url: input.logoUrl || null,
     description: input.description || null,
-    invite_code: input.scope === "internal" ? input.inviteCode?.toUpperCase() : null,
+    invite_code: inviteCode,
     created_by: input.createdBy,
-  });
+  }).select("id").single();
   if (error) {
     logSupabaseError("createGroup failed", error);
     throw error;
   }
+  return data.id as string;
+}
+
+export async function updateGroup(input: AdminGroupInput) {
+  requireSupabase();
+  if (!input.id) throw new Error("Gruppe fehlt.");
+  const { error } = await supabase
+    .from("groups")
+    .update({
+      name: input.name.trim(),
+      category: input.category.trim() || "Intern",
+      icon: input.icon || input.name.slice(0, 2).toUpperCase(),
+      logo_url: input.logoUrl || null,
+      description: input.description || null,
+      invite_code: input.inviteCode.trim().toUpperCase(),
+    })
+    .eq("id", input.id);
+  if (error) {
+    logSupabaseError("updateGroup failed", error);
+    throw error;
+  }
+}
+
+export async function deleteGroup(groupId: string) {
+  requireSupabase();
+  const { error } = await supabase.from("groups").delete().eq("id", groupId);
+  if (error) {
+    logSupabaseError("deleteGroup failed", error);
+    throw error;
+  }
+}
+
+export async function uploadGroupLogo(userId: string, file: File) {
+  requireSupabase();
+  if (!file.type.startsWith("image/")) throw new Error("Bitte wähle eine Bilddatei.");
+  const extension = file.name.split(".").pop()?.toLowerCase() || "png";
+  const path = `${userId}/group-${Date.now()}.${extension}`;
+  const { error } = await supabase.storage.from("movement-media").upload(path, file, {
+    cacheControl: "31536000",
+    upsert: true,
+    contentType: file.type,
+  });
+  if (error) {
+    logSupabaseError("uploadGroupLogo failed", error);
+    throw error;
+  }
+  const { data } = supabase.storage.from("movement-media").getPublicUrl(path);
+  return data.publicUrl;
 }
 
 export async function deleteMovement(movementId: string) {
@@ -1040,12 +1167,45 @@ export async function updateMovement(input: UpdateMovementInput, userId: string)
   const { error } = await supabase
     .from("movements")
     .update(payload)
-    .eq("id", input.id)
-    .eq("user_id", userId);
+    .eq("id", input.id);
 
   if (error) {
     logSupabaseError("updateMovement failed", error);
     throw error;
+  }
+}
+
+export async function updateMovementStatus(movementId: string, userId: string, status: MovementStatus, text?: string) {
+  requireSupabase();
+  const { error } = await supabase.from("movements").update({ status }).eq("id", movementId);
+  if (error) {
+    logSupabaseError("updateMovementStatus failed", error);
+    throw error;
+  }
+  const statusLabel = {
+    submitted: "Eingereicht",
+    trending: "Trendet",
+    review: "In Prüfung",
+    implementation: "In Umsetzung",
+    done: "Fertig",
+  }[status];
+  const body = [text?.trim(), `Status geändert zu: ${statusLabel}`].filter(Boolean).join("\n\n");
+  const insert = await supabase.from("movement_updates").insert({
+    movement_id: movementId,
+    body,
+    status,
+    created_by: userId,
+  });
+  if (insert.error) {
+    const fallback = await supabase.from("movement_updates").insert({
+      movement_id: movementId,
+      body,
+      created_by: userId,
+    });
+    if (fallback.error) {
+      logSupabaseError("updateMovementStatus update insert failed", fallback.error);
+      throw fallback.error;
+    }
   }
 }
 
@@ -1055,7 +1215,7 @@ export async function searchUsers(query: string): Promise<AdminUserResult[]> {
   if (!normalized) return [];
   const { data, error } = await supabase
     .from("profiles")
-    .select("id,email,username,display_name,role")
+    .select("id,email,username,display_name,avatar_url,role")
     .or(`email.ilike.%${normalized}%,username.ilike.%${normalized}%`)
     .limit(12);
   if (error) {
@@ -1068,6 +1228,36 @@ export async function searchUsers(query: string): Promise<AdminUserResult[]> {
     username: row.username ?? "",
     displayName: row.display_name ?? row.username ?? "",
     role: (row.role ?? "user") as UserRole,
+    avatarUrl: row.avatar_url,
+  }));
+}
+
+export async function searchGroupAdminCandidates(query: string, groupId: string): Promise<AdminUserResult[]> {
+  requireSupabase();
+  const normalized = query.trim();
+  if (!normalized) return [];
+  const { data, error } = await supabase.rpc("search_group_admin_candidates", {
+    query_text: normalized,
+    target_group_id: groupId,
+  });
+  if (error) {
+    logSupabaseError("searchGroupAdminCandidates failed", error);
+    throw error;
+  }
+  return ((data ?? []) as Array<{
+    id: string;
+    email: string | null;
+    username: string | null;
+    display_name: string | null;
+    avatar_url: string | null;
+    role: UserRole | null;
+  }>).map((row) => ({
+    id: row.id,
+    email: row.email ?? "",
+    username: row.username ?? "",
+    displayName: row.display_name ?? row.username ?? "",
+    role: (row.role ?? "user") as UserRole,
+    avatarUrl: row.avatar_url,
   }));
 }
 
@@ -1146,6 +1336,8 @@ export async function anonymizeUserProfile(userId: string) {
   const { error } = await supabase
     .from("profiles")
     .update({
+      status: "banned",
+      is_banned: true,
       deleted_at: new Date().toISOString(),
       username: `deleted_user_${shortId}`,
       display_name: "Geloeschter Nutzer",
@@ -1154,6 +1346,24 @@ export async function anonymizeUserProfile(userId: string) {
     .eq("id", userId);
   if (error) {
     logSupabaseError("anonymizeUserProfile failed", error);
+    throw error;
+  }
+}
+
+export async function banUserProfile(userId: string) {
+  requireSupabase();
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      status: "banned",
+      is_banned: true,
+      deleted_at: new Date().toISOString(),
+      display_name: "Geloeschter Nutzer",
+      avatar_url: null,
+    })
+    .eq("id", userId);
+  if (error) {
+    logSupabaseError("banUserProfile failed", error);
     throw error;
   }
 }
@@ -1183,6 +1393,74 @@ export async function uploadMovementMedia(userId: string, file: Blob, extension:
   return data.publicUrl;
 }
 
+export async function fetchNotificationDetail(notification: Notification): Promise<NotificationDetail> {
+  requireSupabase();
+  let movement: Movement | undefined;
+  let content = notification.body;
+  let actorName: string | undefined;
+  let actorEmail: string | undefined;
+  let groupName: string | undefined;
+  const adminActions: string[] = [];
+
+  const movementId =
+    notification.movementId ||
+    (notification.targetType === "movement" ? notification.targetId ?? undefined : undefined);
+
+  if (movementId) {
+    const movements = await fetchMovements();
+    movement = movements.find((item) => item.id === movementId);
+    groupName = movement?.groupName;
+  }
+
+  if (notification.isAdminNotification && notification.targetType === "report" && notification.targetId) {
+    const { data } = await supabase
+      .from("reports")
+      .select("id,reason,created_at,user_id,movements:movement_id(id,title,description,group_id,user_id,groups:group_id(name),profiles:user_id(email,username,display_name))")
+      .eq("id", notification.targetId)
+      .maybeSingle();
+    const report = data as any;
+    content = report?.reason || content;
+    const reportUser = report?.movements?.profiles;
+    actorName = reportUser?.display_name || reportUser?.username;
+    actorEmail = reportUser?.email;
+    groupName = report?.movements?.groups?.name;
+    adminActions.push("Beitrag öffnen", "Beitrag löschen", "Status ändern");
+  } else if (notification.isAdminNotification && notification.targetType === "feedback" && notification.targetId) {
+    const { data } = await supabase
+      .from("feedback")
+      .select("id,subject,body,created_at,user_id,profiles:user_id(email,username,display_name)")
+      .eq("id", notification.targetId)
+      .maybeSingle();
+    const feedback = data as any;
+    content = [feedback?.subject, feedback?.body].filter(Boolean).join("\n\n") || content;
+    actorName = feedback?.profiles?.display_name || feedback?.profiles?.username;
+    actorEmail = feedback?.profiles?.email;
+    adminActions.push("Feedback prüfen");
+  } else if (movement) {
+    content = movement.description || content;
+    actorName = movement.authorDisplayName || movement.authorUsername || undefined;
+    groupName = movement.groupName;
+    adminActions.push("Beitrag öffnen");
+    if (notification.isAdminNotification) adminActions.push("Beitrag löschen", "Status ändern");
+  }
+
+  const typeLabel = notification.isAdminNotification
+    ? `Admin: ${notification.type || notification.targetType || "Hinweis"}`
+    : notification.type || notification.targetType || "Benachrichtigung";
+
+  return {
+    notification,
+    movement,
+    typeLabel,
+    content,
+    actorName,
+    actorEmail,
+    groupName,
+    createdAt: notification.createdAt,
+    adminActions,
+  };
+}
+
 export function deriveStats(movements: Movement[], userId?: string | null): UserStats {
   const ownMovements = userId ? movements.filter((movement) => movement.userId === userId) : [];
   const supportedMovements = userId ? movements.filter((movement) => movement.supportedByUser) : [];
@@ -1193,7 +1471,11 @@ export function deriveStats(movements: Movement[], userId?: string | null): User
   }, {});
   const activeGroupIds = new Set(relevantMovements.map((movement) => movement.groupId).filter(Boolean));
   const reached = relevantMovements.reduce((sum, movement) => sum + movement.supporters, 0);
-  const weeklyBase = relevantMovements.reduce((sum, movement) => sum + movement.weeklyGrowth, 0);
+  const weeklyReach = relevantMovements.reduce(
+    (totals, movement) =>
+      totals.map((value, index) => value + (movement.activityHistory?.[index] ?? 0)),
+    Array.from({ length: 7 }, () => 0),
+  );
 
   return {
     reached,
@@ -1206,8 +1488,6 @@ export function deriveStats(movements: Movement[], userId?: string | null): User
     activeGroups: activeGroupIds.size,
     comments: ownMovements.length,
     risingTopics: relevantMovements.filter((movement) => movement.weeklyGrowth > 0).length,
-    weeklyReach: [0.2, 0.34, 0.42, 0.58, 0.67, 0.82, 1].map((factor) =>
-      Math.round(Math.max(1, weeklyBase) * factor),
-    ),
+    weeklyReach,
   };
 }

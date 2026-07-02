@@ -1,7 +1,7 @@
-import { useMemo, useRef, useState, type FormEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent } from "react";
 import { useAuth } from "../auth/AuthProvider";
-import { anonymizeUserProfile, createGroup, deleteMovement, deleteUserMovements, requestAccountDeletion, searchUsers, updateProfileSettings } from "../data/queries";
-import type { AdminUserResult, Group, GroupMembership, Movement, User, UserStats } from "../types";
+import { addGroupAdmin, anonymizeUserProfile, banUserProfile, createGroup, deleteGroup, deleteMovement, deleteUserMovements, fetchGroupAdmins, removeGroupAdmin, removeGroupMember, requestAccountDeletion, searchGroupAdminCandidates, searchUsers, updateGroup, updateMovementStatus, updateProfileSettings, uploadGroupLogo } from "../data/queries";
+import type { AdminUserResult, Group, GroupAdmin, GroupMembership, Movement, User, UserStats } from "../types";
 import { GroupVisual } from "../components/GroupVisual";
 import { Icon } from "../components/Icon";
 import { SettingsScreen } from "./Settings";
@@ -108,6 +108,22 @@ function initialsFrom(value: string) {
   );
 }
 
+const statusLabels: Record<Movement["status"], string> = {
+  submitted: "Eingereicht",
+  trending: "Trendet",
+  review: "In Prüfung",
+  implementation: "In Umsetzung",
+  done: "Fertig",
+};
+
+const statusOptions: Movement["status"][] = ["submitted", "trending", "review", "implementation", "done"];
+
+function membershipRoleLabel(role: GroupMembership["role"]) {
+  if (role === "admin") return "Admin";
+  if (role === "group_admin") return "Gruppenadmin";
+  return "Mitglied";
+}
+
 export function Profile({
   user,
   groups,
@@ -139,6 +155,14 @@ export function Profile({
   const [groupIcon, setGroupIcon] = useState("");
   const [groupDescription, setGroupDescription] = useState("");
   const [groupCode, setGroupCode] = useState("");
+  const [groupLogoUrl, setGroupLogoUrl] = useState("");
+  const [groupLogoFile, setGroupLogoFile] = useState<File | undefined>();
+  const [editingGroupId, setEditingGroupId] = useState<string | undefined>();
+  const [groupAdmins, setGroupAdmins] = useState<GroupAdmin[]>([]);
+  const [selectedGroupAdmins, setSelectedGroupAdmins] = useState<AdminUserResult[]>([]);
+  const [groupAdminSearch, setGroupAdminSearch] = useState("");
+  const [groupAdminResults, setGroupAdminResults] = useState<AdminUserResult[]>([]);
+  const [groupAdminNotice, setGroupAdminNotice] = useState("");
   const [movementSearch, setMovementSearch] = useState("");
   const [userSearch, setUserSearch] = useState("");
   const [userResults, setUserResults] = useState<AdminUserResult[]>([]);
@@ -150,6 +174,18 @@ export function Profile({
   const userGroups = groups.filter((group) => user.groupIds.includes(group.id));
   const internalMemberships = memberships.filter((membership) => membership.group.scope === "internal");
   const isAdmin = profile?.role === "admin" || user.role === "admin";
+  const groupAdminMemberships = useMemo(
+    () => memberships.filter((membership) => membership.group.scope === "internal" && (membership.role === "group_admin" || membership.role === "admin")),
+    [memberships],
+  );
+  const managedGroupIdList = useMemo(
+    () => (isAdmin ? groups.map((group) => group.id) : groupAdminMemberships.map((membership) => membership.groupId)),
+    [groupAdminMemberships, groups, isAdmin],
+  );
+  const managedGroupIdsKey = managedGroupIdList.join("|");
+  const managedGroupIds = useMemo(() => new Set(managedGroupIdList), [managedGroupIdList]);
+  const manageableGroups = useMemo(() => groups.filter((group) => managedGroupIds.has(group.id)), [groups, managedGroupIds]);
+  const canUseManagement = isAdmin || manageableGroups.length > 0;
   const ownMovements = useMemo(
     () => movements.filter((movement) => movement.userId === user.id),
     [movements, user.id],
@@ -209,15 +245,26 @@ export function Profile({
   const impactRank = buildImpactRank(movements, user.id);
   const verifiedStatus = profile?.role === "admin" ? "Verifiziert" : "Nicht verifiziert";
 
+  useEffect(() => {
+    if (!canUseManagement) {
+      setGroupAdmins([]);
+      return;
+    }
+    void fetchGroupAdmins(managedGroupIdList)
+      .then(setGroupAdmins)
+      .catch((error) => onToast(error instanceof Error ? error.message : "Gruppenadmins konnten nicht geladen werden."));
+  }, [canUseManagement, managedGroupIdsKey]);
+
   const movementResults = useMemo(() => {
     const query = movementSearch.trim().toLowerCase();
-    if (!query) return movements.slice(0, 6);
-    return movements
+    const source = isAdmin ? movements : movements.filter((movement) => managedGroupIds.has(movement.groupId));
+    if (!query) return source.slice(0, 6);
+    return source
       .filter((movement) =>
         [movement.title, movement.groupName, movement.authorUsername].join(" ").toLowerCase().includes(query),
       )
       .slice(0, 12);
-  }, [movementSearch, movements]);
+  }, [isAdmin, managedGroupIds, movementSearch, movements]);
 
   async function saveSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -261,33 +308,139 @@ export function Profile({
     }
   }
 
+  async function reloadGroupAdmins() {
+    if (!canUseManagement) return;
+    setGroupAdmins(await fetchGroupAdmins(managedGroupIdList));
+  }
+
+  async function syncGroupAdmins(groupId: string) {
+    if (!profile) return;
+    const existing = groupAdmins.filter((admin) => admin.groupId === groupId);
+    const selectedIds = new Set(selectedGroupAdmins.map((admin) => admin.id));
+    const existingIds = new Set(existing.map((admin) => admin.userId));
+
+    for (const admin of selectedGroupAdmins) {
+      if (!existingIds.has(admin.id)) await addGroupAdmin(groupId, admin.id, profile.id);
+    }
+    for (const admin of existing) {
+      if (!selectedIds.has(admin.userId)) await removeGroupAdmin(groupId, admin.userId);
+    }
+  }
+
   async function submitGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!profile) return;
+    if (!groupName.trim()) {
+      onToast("Gruppenname darf nicht leer sein.");
+      return;
+    }
     if (groupCode.length !== 5) {
       onToast("Interne Gruppen brauchen genau 5 Zeichen Einladungscode.");
       return;
     }
     setBusy(true);
     try {
-      await createGroup({
+      const wasEditing = Boolean(editingGroupId);
+      const logoUrl = groupLogoFile ? await uploadGroupLogo(profile.id, groupLogoFile) : groupLogoUrl;
+      const payload = {
+        id: editingGroupId,
         name: groupName,
-        category: groupCategory,
-        scope: "internal",
+        category: groupCategory || "Intern",
         icon: groupIcon,
+        logoUrl,
         description: groupDescription,
         inviteCode: groupCode,
-        createdBy: profile.id,
-      });
-      setGroupName("");
-      setGroupCategory("");
-      setGroupIcon("");
-      setGroupDescription("");
-      setGroupCode("");
+      };
+      if (editingGroupId) {
+        await updateGroup(payload);
+        await syncGroupAdmins(editingGroupId);
+      } else {
+        const groupId = await createGroup({
+          ...payload,
+          scope: "internal",
+          createdBy: profile.id,
+        });
+        await syncGroupAdmins(groupId);
+      }
+      resetGroupForm();
       await onRefresh();
-      onToast("Gruppe erstellt.");
+      await reloadGroupAdmins();
+      onToast(wasEditing ? "Gruppe aktualisiert." : "Gruppe erstellt.");
     } catch (error) {
       onToast(error instanceof Error ? error.message : "Gruppe konnte nicht erstellt werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function resetGroupForm() {
+    setGroupName("");
+    setGroupCategory("");
+    setGroupIcon("");
+    setGroupDescription("");
+    setGroupCode("");
+    setGroupLogoUrl("");
+    setGroupLogoFile(undefined);
+    setEditingGroupId(undefined);
+    setSelectedGroupAdmins([]);
+    setGroupAdminSearch("");
+    setGroupAdminResults([]);
+    setGroupAdminNotice("");
+  }
+
+  function editGroup(group: Group) {
+    setEditingGroupId(group.id);
+    setGroupName(group.name);
+    setGroupCategory(group.category);
+    setGroupIcon(group.icon || "");
+    setGroupDescription(group.description || "");
+    setGroupCode((group.inviteCode || "").toUpperCase());
+    setGroupLogoUrl(group.logoUrl || "");
+    setGroupLogoFile(undefined);
+    setSelectedGroupAdmins(
+      groupAdmins
+        .filter((admin) => admin.groupId === group.id)
+        .map((admin) => ({
+          id: admin.userId,
+          email: admin.email,
+          username: admin.username,
+          displayName: admin.displayName,
+          role: "user",
+          avatarUrl: admin.avatarUrl,
+        })),
+    );
+    setGroupAdminSearch("");
+    setGroupAdminResults([]);
+    setGroupAdminNotice("");
+  }
+
+  async function removeGroup(group: Group) {
+    const isCitrus = group.name.toLowerCase().includes("citrus");
+    const message = isCitrus
+      ? "Citrus-Systemgruppe wirklich löschen? Das kann bestehende Beiträge betreffen."
+      : "Diese Gruppe wirklich löschen? Bestehende Beiträge können dadurch betroffen sein.";
+    if (!window.confirm(message)) return;
+    setBusy(true);
+    try {
+      await deleteGroup(group.id);
+      await onRefresh();
+      onToast("Gruppe gelöscht.");
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Gruppe konnte nicht gelöscht werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeMovementStatus(id: string, status: Movement["status"]) {
+    if (!profile) return;
+    setBusy(true);
+    try {
+      await updateMovementStatus(id, profile.id, status);
+      await onRefresh();
+      onToast("Status aktualisiert.");
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Status konnte nicht gespeichert werden.");
     } finally {
       setBusy(false);
     }
@@ -318,6 +471,52 @@ export function Profile({
     }
   }
 
+  async function runGroupAdminSearch(targetGroupId?: string) {
+    const query = groupAdminSearch.trim();
+    if (!query) return;
+    setBusy(true);
+    setGroupAdminNotice("");
+    try {
+      const results = targetGroupId
+        ? await searchGroupAdminCandidates(query, targetGroupId)
+        : await searchUsers(query);
+      const selectedIds = new Set(selectedGroupAdmins.map((admin) => admin.id));
+      const filtered = results.filter((result) => !selectedIds.has(result.id));
+      setGroupAdminResults(filtered);
+      setGroupAdminNotice(filtered.length ? "" : "Kein passender Nutzer gefunden.");
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Nutzer konnten nicht geladen werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function addSelectedGroupAdmin(item: AdminUserResult) {
+    setSelectedGroupAdmins((current) => current.some((admin) => admin.id === item.id) ? current : [...current, item]);
+    setGroupAdminResults((current) => current.filter((result) => result.id !== item.id));
+    setGroupAdminNotice("");
+  }
+
+  function removeSelectedGroupAdmin(userId: string) {
+    setSelectedGroupAdmins((current) => current.filter((admin) => admin.id !== userId));
+  }
+
+  async function removeMemberFromGroup(groupId: string, item: AdminUserResult) {
+    if (!window.confirm("Nutzer aus dieser Gruppe entfernen?")) return;
+    setBusy(true);
+    try {
+      await removeGroupMember(groupId, item.id);
+      await removeGroupAdmin(groupId, item.id);
+      await onRefresh();
+      await reloadGroupAdmins();
+      onToast("Nutzer aus Gruppe entfernt.");
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Nutzer konnte nicht entfernt werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
 
   async function removeUser(item: AdminUserResult, deletePosts: boolean) {
     const label = deletePosts ? "Nutzer anonymisieren und alle Beiträge löschen?" : "Nutzer anonymisieren und Beiträge behalten?";
@@ -331,6 +530,21 @@ export function Profile({
       onToast(deletePosts ? "Nutzer anonymisiert und Beiträge gelöscht." : "Nutzer anonymisiert.");
     } catch (error) {
       onToast(error instanceof Error ? error.message : "Nutzer konnte nicht gelöscht werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function banUser(item: AdminUserResult) {
+    if (!window.confirm("Diesen Nutzer sperren und aus aktiven Sessions blockieren?")) return;
+    setBusy(true);
+    try {
+      await banUserProfile(item.id);
+      setUserResults((current) => current.filter((userResult) => userResult.id !== item.id));
+      await onRefresh();
+      onToast("Nutzer gesperrt.");
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Nutzer konnte nicht gesperrt werden.");
     } finally {
       setBusy(false);
     }
@@ -369,6 +583,48 @@ export function Profile({
 
   function endEdgeSwipe() {
     edgeSwipeStart.current = null;
+  }
+
+  function renderGroupAdminPicker(targetGroupId?: string) {
+    return (
+      <div className="group-admin-picker">
+        <label>
+          Nutzer als Gruppenadmin suchen
+          <div className="admin-search-row">
+            <input value={groupAdminSearch} onChange={(event) => setGroupAdminSearch(event.target.value)} placeholder="Benutzername" />
+            <button type="button" onClick={() => void runGroupAdminSearch(targetGroupId)} disabled={busy || !groupAdminSearch.trim()}>
+              Suchen
+            </button>
+          </div>
+        </label>
+        {groupAdminNotice ? <small className="role-note">{groupAdminNotice}</small> : null}
+        {groupAdminResults.length ? (
+          <div className="admin-results compact-admin-results">
+            {groupAdminResults.map((item) => (
+              <article key={item.id}>
+                <span>
+                  <strong>{item.displayName || item.username || "Nutzer"}</strong>
+                  <small>{item.username || item.email || "Ohne Benutzername"}</small>
+                </span>
+                <div className="admin-result-actions">
+                  <button type="button" onClick={() => addSelectedGroupAdmin(item)} disabled={busy}>Hinzufügen</button>
+                  {targetGroupId ? <button type="button" onClick={() => void removeMemberFromGroup(targetGroupId, item)} disabled={busy}>Aus Gruppe entfernen</button> : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : null}
+        <div className="selected-group-admins">
+          {selectedGroupAdmins.length ? selectedGroupAdmins.map((admin) => (
+            <span key={admin.id}>
+              {admin.avatarUrl ? <img src={admin.avatarUrl} alt="" /> : null}
+              <strong>{admin.displayName || admin.username || "Nutzer"}</strong>
+              <button type="button" onClick={() => removeSelectedGroupAdmin(admin.id)} aria-label="Gruppenadmin entfernen">Entfernen</button>
+            </span>
+          )) : <small>Noch keine Gruppenadmins ausgewählt.</small>}
+        </div>
+      </div>
+    );
   }
 
   if (!isAuthenticated) {
@@ -540,8 +796,11 @@ export function Profile({
                     <input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Name" required />
                     <input value={groupCategory} onChange={(event) => setGroupCategory(event.target.value)} placeholder="Kategorie" required />
                     <input value="Intern" readOnly aria-label="Gruppentyp" />
-                    <input value={groupIcon} onChange={(event) => setGroupIcon(event.target.value)} placeholder="Icon oder Initialen" />
                     <textarea value={groupDescription} onChange={(event) => setGroupDescription(event.target.value)} placeholder="Beschreibung" rows={3} />
+                    <label className="image-upload-field">
+                      Profilbild
+                      <input type="file" accept="image/png,image/jpeg,image/webp,image/avif" onChange={(event) => setGroupLogoFile(event.target.files?.[0])} />
+                    </label>
                     <input
                       value={groupCode}
                       onChange={(event) => setGroupCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))}
@@ -826,14 +1085,14 @@ export function Profile({
                   <div>
                     <strong>{membership.group.name}</strong>
                     <small>
-                      {membership.group.category} · {membership.role === "admin" ? "Admin" : "Mitglied"} · seit{" "}
+                      {membership.group.category} · {membershipRoleLabel(membership.role)} · seit{" "}
                       {membership.joinedAt
                         ? new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "short", year: "numeric" }).format(
                             new Date(membership.joinedAt),
                           )
                         : "heute"}
                     </small>
-                    {membership.role === "admin" ? (
+                    {membership.role === "admin" || membership.role === "group_admin" ? (
                       <small className="role-note">Admin-Mitgliedschaften können nicht direkt verlassen werden.</small>
                     ) : null}
                   </div>
@@ -844,7 +1103,7 @@ export function Profile({
                     <button
                       type="button"
                       onClick={() => onLeaveGroup(membership)}
-                      disabled={busy || membership.role === "admin"}
+                      disabled={busy || membership.role === "admin" || membership.role === "group_admin"}
                     >
                       Verlassen
                     </button>
@@ -857,7 +1116,7 @@ export function Profile({
           )}
         </section>
 
-        {isAdmin ? (
+        {canUseManagement ? (
           <section className="admin-panel profile-reference-admin">
             <button className="admin-toggle" type="button" onClick={() => setAdminOpen((value) => !value)}>
               <span>Verwaltung</span>
@@ -865,13 +1124,17 @@ export function Profile({
             </button>
             {adminOpen ? (
               <div className="admin-stack">
+                {isAdmin && !editingGroupId ? (
                 <form className="admin-form profile-reference-form" onSubmit={submitGroup}>
                   <h3>Gruppen erstellen</h3>
                   <input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Name" required />
                   <input value={groupCategory} onChange={(event) => setGroupCategory(event.target.value)} placeholder="Kategorie" required />
                     <input value="Intern" readOnly aria-label="Gruppentyp" />
-                  <input value={groupIcon} onChange={(event) => setGroupIcon(event.target.value)} placeholder="Icon oder Initialen" />
                   <textarea value={groupDescription} onChange={(event) => setGroupDescription(event.target.value)} placeholder="Beschreibung" rows={3} />
+                  <label className="image-upload-field">
+                    Profilbild
+                    <input type="file" accept="image/png,image/jpeg,image/webp,image/avif" onChange={(event) => setGroupLogoFile(event.target.files?.[0])} />
+                  </label>
                     <input
                       value={groupCode}
                       onChange={(event) => setGroupCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))}
@@ -879,10 +1142,58 @@ export function Profile({
                       maxLength={5}
                       required
                     />
+                  {renderGroupAdminPicker()}
                   <button className="primary-button" type="submit" disabled={busy}>
                     Gruppe erstellen
                   </button>
                 </form>
+                ) : null}
+
+                <div className="admin-form profile-reference-form">
+                  <h3>Gruppen verwalten</h3>
+                  <div className="admin-results group-admin-results">
+                    {manageableGroups.map((group) => (
+                      <article key={group.id}>
+                        <GroupVisual group={group} className="group-avatar" />
+                        <span>
+                          <strong>{group.name}</strong>
+                          <small>{group.category} · Code {group.inviteCode || "fehlt"}</small>
+                        </span>
+                        <div className="admin-result-actions">
+                          <button type="button" onClick={() => editGroup(group)} disabled={busy}>Bearbeiten</button>
+                          {isAdmin ? <button type="button" onClick={() => removeGroup(group)} disabled={busy}>Löschen</button> : null}
+                        </div>
+                        {editingGroupId === group.id ? (
+                          <form className="admin-form profile-reference-form inline-group-edit" onSubmit={submitGroup}>
+                            <h3>Gruppe bearbeiten</h3>
+                            <input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Name" required />
+                            <input value={groupCategory} onChange={(event) => setGroupCategory(event.target.value)} placeholder="Kategorie" required />
+                            <input value="Intern" readOnly aria-label="Gruppentyp" />
+                            <textarea value={groupDescription} onChange={(event) => setGroupDescription(event.target.value)} placeholder="Beschreibung" rows={3} />
+                            <label className="image-upload-field">
+                              Profilbild
+                              <input type="file" accept="image/png,image/jpeg,image/webp,image/avif" onChange={(event) => setGroupLogoFile(event.target.files?.[0])} />
+                            </label>
+                            <input
+                              value={groupCode}
+                              onChange={(event) => setGroupCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))}
+                              placeholder="5-stelliger Einladungscode"
+                              maxLength={5}
+                              required
+                            />
+                            {renderGroupAdminPicker(group.id)}
+                            <button className="primary-button" type="submit" disabled={busy}>
+                              Änderungen speichern
+                            </button>
+                            <button className="secondary-button full" type="button" onClick={resetGroupForm}>
+                              Abbrechen
+                            </button>
+                          </form>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                </div>
 
                 <div className="admin-form profile-reference-form">
                   <h3>Beiträge löschen</h3>
@@ -892,6 +1203,12 @@ export function Profile({
                       <article key={movement.id}>
                         <span>
                           <strong>{movement.title}</strong>
+                          <span className="admin-result-actions">
+                            <button type="button" onClick={() => onOpenMovement(movement)}>Öffnen</button>
+                            <select value={movement.status} onChange={(event) => changeMovementStatus(movement.id, event.target.value as Movement["status"])} disabled={busy}>
+                              {statusOptions.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}
+                            </select>
+                          </span>
                           <small>{movement.groupName} · {movement.authorUsername || "Unbekannt"}</small>
                         </span>
                         <button type="button" onClick={() => removeMovement(movement.id)}>
@@ -918,6 +1235,7 @@ export function Profile({
                           <small>{item.email} · {item.role}</small>
                         </span>
                         <div className="admin-result-actions">
+                          <button type="button" onClick={() => banUser(item)} disabled={busy}>Sperren</button>
                           <button type="button" onClick={() => removeUser(item, false)} disabled={busy}>Anonymisieren</button>
                           <button type="button" onClick={() => removeUser(item, true)} disabled={busy}>Nutzer + Beiträge löschen</button>
                         </div>
@@ -1027,14 +1345,14 @@ export function Profile({
                 <div>
                   <strong>{membership.group.name}</strong>
                   <small>
-                    {membership.group.category} · {membership.role === "admin" ? "Admin" : "Mitglied"} · seit{" "}
+                    {membership.group.category} · {membershipRoleLabel(membership.role)} · seit{" "}
                     {membership.joinedAt
                       ? new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "short", year: "numeric" }).format(
                           new Date(membership.joinedAt),
                         )
                       : "heute"}
                   </small>
-                  {membership.role === "admin" ? (
+                  {membership.role === "admin" || membership.role === "group_admin" ? (
                     <small className="role-note">Admin-Mitgliedschaften können nicht direkt verlassen werden.</small>
                   ) : null}
                 </div>
@@ -1045,7 +1363,7 @@ export function Profile({
                   <button
                     type="button"
                     onClick={() => onLeaveGroup(membership)}
-                    disabled={busy || membership.role === "admin"}
+                    disabled={busy || membership.role === "admin" || membership.role === "group_admin"}
                   >
                     Verlassen
                   </button>
@@ -1111,8 +1429,11 @@ export function Profile({
                 <input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Name" required />
                 <input value={groupCategory} onChange={(event) => setGroupCategory(event.target.value)} placeholder="Kategorie" required />
                 <input value="Intern" readOnly aria-label="Gruppentyp" />
-                <input value={groupIcon} onChange={(event) => setGroupIcon(event.target.value)} placeholder="Icon oder Initialen" />
                 <textarea value={groupDescription} onChange={(event) => setGroupDescription(event.target.value)} placeholder="Beschreibung" rows={3} />
+                <label className="image-upload-field">
+                  Profilbild
+                  <input type="file" accept="image/png,image/jpeg,image/webp,image/avif" onChange={(event) => setGroupLogoFile(event.target.files?.[0])} />
+                </label>
                 <input
                   value={groupCode}
                   onChange={(event) => setGroupCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))}

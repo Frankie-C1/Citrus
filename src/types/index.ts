@@ -19,6 +19,8 @@ export type Profile = {
   displayName: string;
   avatarUrl?: string | null;
   role: UserRole;
+  status?: "active" | "banned";
+  isBanned?: boolean;
   hasSeenConductNotice: boolean;
   deletionRequestedAt?: string | null;
   deletedAt?: string | null;
@@ -53,15 +55,27 @@ export type GroupMembership = {
   id: string;
   groupId: string;
   userId: string;
-  role: "member" | "admin";
+  role: "member" | "admin" | "group_admin";
   joinedAt: string;
   group: Group;
+};
+
+export type GroupAdmin = {
+  id: string;
+  groupId: string;
+  userId: string;
+  createdAt?: string;
+  username: string;
+  displayName: string;
+  email: string;
+  avatarUrl?: string | null;
 };
 
 export type Update = {
   id: string;
   text: string;
   createdAt: string;
+  status?: MovementStatus | null;
 };
 
 export type Movement = {
@@ -75,6 +89,7 @@ export type Movement = {
   groupId: string;
   groupName: string;
   groupIcon?: string | null;
+  groupLogoUrl?: string | null;
   scope: Scope;
   type: MovementType;
   supporters: number;
@@ -120,6 +135,18 @@ export type Notification = {
   createdAt?: string;
 };
 
+export type NotificationDetail = {
+  notification: Notification;
+  movement?: Movement;
+  typeLabel: string;
+  content?: string;
+  actorName?: string;
+  actorEmail?: string;
+  groupName?: string;
+  createdAt?: string;
+  adminActions?: string[];
+};
+
 export type CreateMovementInput = {
   title: string;
   description: string;
@@ -150,6 +177,17 @@ export type UpdateMovementInput = {
   imageFile?: File;
 };
 
+export type AdminGroupInput = {
+  id?: string;
+  name: string;
+  category: string;
+  icon?: string;
+  logoUrl?: string | null;
+  description?: string;
+  inviteCode: string;
+  createdBy?: string;
+};
+
 export type UserStats = {
   reached: number;
   supportedTopics: number;
@@ -168,6 +206,7 @@ export type AdminUserResult = {
   username: string;
   displayName: string;
   role: UserRole;
+  avatarUrl?: string | null;
 };
 
 export type Tab = "home" | "feed" | "insights" | "profile";

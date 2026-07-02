@@ -14,6 +14,7 @@ export function AuthModal({ open, onClose, onSuccess }: AuthModalProps) {
   const { signIn, signUp } = useAuth();
   const [mode, setMode] = useState<"signup" | "login">("signup");
   const [username, setUsername] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -36,9 +37,10 @@ export function AuthModal({ open, onClose, onSuccess }: AuthModalProps) {
           return;
         }
       } else {
-        await signIn(email, password);
+        await signIn(identifier, password);
       }
       setUsername("");
+      setIdentifier("");
       setEmail("");
       setPassword("");
       onSuccess();
@@ -84,16 +86,28 @@ export function AuthModal({ open, onClose, onSuccess }: AuthModalProps) {
               />
             </label>
           ) : null}
-          <label>
-            E-Mail
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              autoComplete="email"
-              required
-            />
-          </label>
+          {mode === "signup" ? (
+            <label>
+              E-Mail
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoComplete="email"
+                required
+              />
+            </label>
+          ) : (
+            <label>
+              Benutzername oder E-Mail
+              <input
+                value={identifier}
+                onChange={(event) => setIdentifier(event.target.value)}
+                autoComplete="username"
+                required
+              />
+            </label>
+          )}
           <label>
             Passwort
             <input

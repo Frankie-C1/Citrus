@@ -8,10 +8,13 @@ type MovementDetailProps = {
   movement: Movement;
   onBack: () => void;
   onToggleSupport: (id: string) => void;
+  onToggleDislike: (id: string) => void;
   onShare: (movement: Movement) => void;
   onReport: (movement: Movement) => void;
   canManage?: boolean;
+  isAdmin?: boolean;
   onPostUpdate?: (id: string, text: string) => Promise<void> | void;
+  onChangeStatus?: (id: string, status: Movement["status"], text?: string) => Promise<void> | void;
   onDelete?: (id: string) => Promise<void> | void;
 };
 
@@ -22,6 +25,8 @@ const statusLabels: Record<Movement["status"], string> = {
   implementation: "In Umsetzung",
   done: "Umgesetzt",
 };
+
+const statusOptions: Movement["status"][] = ["submitted", "trending", "review", "implementation", "done"];
 
 function relativeTime(value?: string) {
   if (!value) return "";
@@ -44,10 +49,12 @@ function copyMovementLink(movement: Movement) {
   void navigator.clipboard?.writeText(url);
 }
 
-export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onReport, canManage = false, onPostUpdate, onDelete }: MovementDetailProps) {
+export function MovementDetail({ movement, onBack, onToggleSupport, onToggleDislike, onShare, onReport, canManage = false, isAdmin = false, onPostUpdate, onChangeStatus, onDelete }: MovementDetailProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [updateOpen, setUpdateOpen] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
   const [updateText, setUpdateText] = useState("");
+  const [selectedStatus, setSelectedStatus] = useState<Movement["status"]>(movement.status);
   const [busy, setBusy] = useState(false);
   const name = displayAuthorName(movement);
   const imageUrl = movementImageUrl(movement);
@@ -56,11 +63,17 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
   const updateTextRef = useRef<HTMLTextAreaElement>(null);
 
   async function submitUpdate() {
-    if (!updateText.trim() || !onPostUpdate) return;
+    const statusChanged = selectedStatus !== movement.status;
+    if (!updateText.trim() && !statusChanged) return;
     setBusy(true);
     try {
-      await onPostUpdate(movement.id, updateText.trim());
+      if (statusChanged && onChangeStatus) {
+        await onChangeStatus(movement.id, selectedStatus, updateText.trim() || undefined);
+      } else if (updateText.trim() && onPostUpdate) {
+        await onPostUpdate(movement.id, updateText.trim());
+      }
       setUpdateText("");
+      setSelectedStatus(movement.status);
       setUpdateOpen(false);
       setMenuOpen(false);
     } finally {
@@ -70,11 +83,24 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
 
   function openUpdateForm() {
     setUpdateOpen(true);
+    setStatusOpen(false);
     setMenuOpen(false);
     window.setTimeout(() => {
       updateSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       updateTextRef.current?.focus({ preventScroll: true });
     }, 80);
+  }
+
+  async function changeStatus(status: Movement["status"]) {
+    if (!onChangeStatus) return;
+    setBusy(true);
+    try {
+      await onChangeStatus(movement.id, status);
+      setStatusOpen(false);
+      setMenuOpen(false);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -99,6 +125,7 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
           {menuOpen ? (
             <div className="feed-more-menu detail-menu">
               {canManage ? <button type="button" onClick={openUpdateForm}>Update posten</button> : null}
+              {canManage ? <button type="button" onClick={() => { setStatusOpen(true); setUpdateOpen(false); setMenuOpen(false); }}>Status ändern</button> : null}
               {canManage ? (
                 <button
                   type="button"
@@ -124,8 +151,17 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
           onClick={() => onToggleSupport(movement.id)}
           aria-label="Unterstützen"
         >
-          <Icon name="star" size={29} />
+          <Icon name="thumbsUp" size={29} />
           <span>{movement.supporters.toLocaleString("de-DE")}</span>
+        </button>
+        <button
+          className={`feed-action-button dislike ${movement.dislikedByUser ? "active" : ""}`}
+          type="button"
+          onClick={() => onToggleDislike(movement.id)}
+          aria-label="Dislike"
+        >
+          <Icon name="thumbsDown" size={29} />
+          <span>{(movement.dislikes ?? 0).toLocaleString("de-DE")}</span>
         </button>
         <button className="feed-action-button" type="button" onClick={() => onShare(movement)} aria-label="Teilen">
           <Icon name="share" size={26} />
@@ -174,10 +210,27 @@ export function MovementDetail({ movement, onBack, onToggleSupport, onShare, onR
         <section className="detail-glass-block" ref={updateSectionRef}>
           <h2>Updates</h2>
           {canManage ? <button className="detail-update-jump" type="button" onClick={openUpdateForm}>Update posten</button> : null}
+          {canManage ? <button className="detail-update-jump" type="button" onClick={() => setStatusOpen((open) => !open)}>Status ändern</button> : null}
+          {statusOpen ? (
+            <div className="detail-status-form">
+              {statusOptions.map((status) => (
+                <button className={movement.status === status ? "active" : ""} type="button" key={status} onClick={() => changeStatus(status)} disabled={busy}>
+                  {statusLabels[status]}
+                </button>
+              ))}
+              {isAdmin ? <small>Admin-Aktion für alle Beiträge.</small> : null}
+            </div>
+          ) : null}
           {updateOpen ? (
             <div className="detail-update-form">
+              <label>
+                Status optional ändern
+                <select value={selectedStatus} onChange={(event) => setSelectedStatus(event.target.value as Movement["status"])}>
+                  {statusOptions.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}
+                </select>
+              </label>
               <textarea ref={updateTextRef} value={updateText} onChange={(event) => setUpdateText(event.target.value)} rows={4} maxLength={500} placeholder="Was gibt es Neues?" />
-              <button type="button" onClick={submitUpdate} disabled={busy || !updateText.trim()}>
+              <button type="button" onClick={submitUpdate} disabled={busy || (!updateText.trim() && selectedStatus === movement.status)}>
                 {busy ? "Postet..." : "Update posten"}
               </button>
             </div>

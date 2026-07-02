@@ -17,6 +17,7 @@ import {
   fetchGroupMemberships,
   fetchGroups,
   fetchMovements,
+  fetchNotificationDetail,
   fetchNotifications,
   fetchSettingsBundle,
   joinGroupByCode,
@@ -28,6 +29,7 @@ import {
   removeSupport,
   reportMovement as saveReport,
   updateMovement,
+  updateMovementStatus,
   uploadMovementMedia,
 } from "./data/queries";
 import saxophoneImage from "./assets/onboarding/saxophone-onboarding.png";
@@ -49,6 +51,7 @@ import type {
   GroupMembership,
   Movement,
   Notification,
+  NotificationDetail,
   Tab,
   Toast as ToastType,
   UpdateMovementInput,
@@ -100,6 +103,14 @@ function fallbackUser(): User {
   };
 }
 
+function scrollAppToTop() {
+  window.requestAnimationFrame(() => {
+    const scroller = document.querySelector<HTMLElement>(".screen-content");
+    scroller?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  });
+}
+
 async function compressImage(file: File): Promise<{ blob: Blob; extension: "avif" | "webp" }> {
   if (!file.type.startsWith("image/")) throw new Error("Bitte wähle eine Bilddatei.");
 
@@ -130,7 +141,7 @@ function LoadingScreen() {
       <img className="app-loading-bg" src={saxophoneImage} alt="" />
       <div className="app-loading-overlay" />
       <div className="app-loading-brand">
-        <img className="app-loading-logo" src="/app-icon-512.png" alt="Citrus" />
+        <img className="app-loading-logo" src="/citrus-logo.png" alt="Citrus" />
         <h1>Citrus</h1>
         <p>Was zählt, wird sichtbar.</p>
       </div>
@@ -161,6 +172,7 @@ function App() {
   const [memberships, setMemberships] = useState<GroupMembership[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notificationDetail, setNotificationDetail] = useState<NotificationDetail | undefined>();
   const [userSettings, setUserSettings] = useState<UserSettings>(defaultUserSettings);
   const [loadingData, setLoadingData] = useState(true);
   const [initialDataReady, setInitialDataReady] = useState(false);
@@ -273,10 +285,8 @@ function App() {
   }, [authLoading, dataError, initialDataReady, splashReady, startupSplashDone]);
 
   useEffect(() => {
-    if (activeTab !== "feed" && !sheetOpen && !searchOpen && !authOpen && !reportTarget) return;
-    const isFeedLock = activeTab === "feed";
-    const scrollY = isFeedLock ? 0 : window.scrollY;
-    if (isFeedLock) window.scrollTo(0, 0);
+    if (!sheetOpen && !searchOpen && !authOpen && !reportTarget) return;
+    const scrollY = window.scrollY;
     const previous = {
       overflow: document.body.style.overflow,
       position: document.body.style.position,
@@ -294,7 +304,7 @@ function App() {
       document.body.style.width = previous.width;
       window.scrollTo(0, scrollY);
     };
-  }, [activeTab, authOpen, reportTarget, searchOpen, sheetOpen]);
+  }, [authOpen, reportTarget, searchOpen, sheetOpen]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -330,6 +340,10 @@ function App() {
   const stats = useMemo(() => deriveStats(movements, currentUserId), [currentUserId, movements]);
   const internalGroups = useMemo(() => groups.filter((group) => group.scope === "internal"), [groups]);
   const membershipGroupIds = useMemo(() => new Set(memberships.map((membership) => membership.groupId)), [memberships]);
+  const groupAdminGroupIds = useMemo(
+    () => new Set(memberships.filter((membership) => membership.role === "group_admin" || membership.role === "admin").map((membership) => membership.groupId)),
+    [memberships],
+  );
   const visibleMovements = useMemo(
     () =>
       movements.map((movement) =>
@@ -370,6 +384,28 @@ function App() {
   const selectedMovement = detailMovementId
     ? internalVisibleMovements.find((movement) => movement.id === detailMovementId)
     : undefined;
+
+  useEffect(() => {
+    scrollAppToTop();
+  }, [activeTab, detailMovementId, groupsViewOpen, notificationsOpen, searchOpen, sheetOpen]);
+
+  useEffect(() => {
+    if (!selectedMovement) return;
+    const previous = {
+      htmlBackground: document.documentElement.style.background,
+      bodyBackground: document.body.style.background,
+      rootBackground: document.getElementById("root")?.style.background,
+    };
+    const root = document.getElementById("root");
+    document.documentElement.style.background = "#050505";
+    document.body.style.background = "#050505";
+    if (root) root.style.background = "#050505";
+    return () => {
+      document.documentElement.style.background = previous.htmlBackground;
+      document.body.style.background = previous.bodyBackground;
+      if (root && typeof previous.rootBackground === "string") root.style.background = previous.rootBackground;
+    };
+  }, [selectedMovement]);
 
   const rankedFeedCandidates = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -525,6 +561,20 @@ function App() {
       showToast("Update gepostet.");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Update konnte nicht gespeichert werden.");
+    }
+  }
+
+  async function handleChangeMovementStatus(id: string, status: Movement["status"], text?: string) {
+    if (!authUser) {
+      setAuthOpen(true);
+      return;
+    }
+    try {
+      await updateMovementStatus(id, authUser.id, status, text);
+      await loadData();
+      showToast("Status aktualisiert.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Status konnte nicht gespeichert werden.");
     }
   }
 
@@ -740,6 +790,7 @@ function App() {
   function openMovement(movement: Movement) {
     pushInternalState("detail");
     setDetailMovementId(movement.id);
+    scrollAppToTop();
   }
 
   function openGroup(groupId: string) {
@@ -749,6 +800,7 @@ function App() {
     setFeedQueue([]);
     setActiveFeedIndex(0);
     setActiveTab("feed");
+    scrollAppToTop();
   }
 
   function changeTab(tab: Tab) {
@@ -760,12 +812,14 @@ function App() {
     setDetailMovementId(undefined);
     setGroupsViewOpen(false);
     setNotificationsOpen(false);
+    setNotificationDetail(undefined);
     setSearchOpen(false);
     if (tab === "feed") {
       setFeedQueue([]);
       setActiveFeedIndex(0);
       setNewFeedItemsAvailable(false);
     }
+    scrollAppToTop();
   }
 
   async function handleMarkNotificationsRead() {
@@ -891,7 +945,7 @@ function App() {
       onToggleSupport={handleToggleSupport}
       onOpenFeed={() => changeTab("feed")}
       onOpenSearch={() => { pushInternalState("search"); setSearchOpen(true); }}
-      onOpenNotifications={() => { pushInternalState("notifications"); setNotificationsOpen(true); }}
+      onOpenNotifications={() => { pushInternalState("notifications"); setNotificationDetail(undefined); setNotificationsOpen(true); }}
       onPlus={() => { pushInternalState("sheet"); setSheetOpen(true); }}
       onAuth={() => { pushInternalState("auth"); setAuthOpen(true); }}
       onRefresh={() => loadData({ silent: true })}
@@ -904,10 +958,13 @@ function App() {
         movement={selectedMovement}
         onBack={() => setDetailMovementId(undefined)}
         onToggleSupport={handleToggleSupport}
+        onToggleDislike={handleToggleDislike}
         onShare={shareMovement}
         onReport={reportMovement}
-        canManage={Boolean(authUser && selectedMovement.userId === authUser.id)}
+        canManage={Boolean(authUser && (selectedMovement.userId === authUser.id || profile?.role === "admin" || groupAdminGroupIds.has(selectedMovement.groupId)))}
+        isAdmin={profile?.role === "admin"}
         onPostUpdate={handlePostMovementUpdate}
+        onChangeStatus={handleChangeMovementStatus}
         onDelete={handleDeleteOwnMovement}
       />
     );
@@ -915,17 +972,27 @@ function App() {
     content = (
       <Notifications
         notifications={notifications}
+        detail={notificationDetail}
         movements={internalVisibleMovements}
         isAuthenticated={Boolean(authUser)}
-        onBack={() => setNotificationsOpen(false)}
+        onBack={() => {
+          if (notificationDetail) {
+            setNotificationDetail(undefined);
+            return;
+          }
+          setNotificationsOpen(false);
+        }}
         onOpenNotification={async (notification) => {
           setNotifications((current) =>
             current.map((item) => (item.id === notification.id ? { ...item, isRead: true } : item)),
           );
           await markNotificationRead(notification);
+          const detail = await fetchNotificationDetail(notification);
+          setNotificationDetail(detail);
         }}
         onOpenMovement={(movement) => {
           setNotificationsOpen(false);
+          setNotificationDetail(undefined);
           openMovement(movement);
         }}
         onMarkAllRead={handleMarkNotificationsRead}

@@ -9,7 +9,7 @@ export function StarburstLogo({ className = "", size = 42 }: StarburstLogoProps)
       className={className}
       width={size}
       height={size}
-      src="/app-icon-512.png"
+      src="/citrus-logo.png"
       alt="Citrus"
       aria-label="Citrus"
       decoding="async"

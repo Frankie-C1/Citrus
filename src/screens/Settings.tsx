@@ -515,7 +515,7 @@ export function SettingsScreen({
 
           <SettingsSection title="Privatsphäre & Sicherheit">
             <SettingsItem title="Datenschutz" detail={userSettings.privacyVisibility === "anonymous" ? "Anonym" : "Sichtbar"} onClick={() => setPane("privacy")} />
-            <SettingsItem title="Sicherheit" detail="Alle Geräte abmelden" onClick={() => setPane("security")} />
+            <SettingsItem title="Sicherheit" detail="Geräte abmelden" onClick={() => setPane("security")} />
           </SettingsSection>
 
           <SettingsSection title="Citrus">

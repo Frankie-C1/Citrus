@@ -29,8 +29,6 @@ const typeLabels: Array<{ id: MovementType; emoji: string; label: string; hint: 
   { id: "question", emoji: "?", label: "Frage", hint: "Du willst etwas klären oder sichtbar machen." },
 ];
 
-const quickEmoji = ["*", "+", "!", "?", "C", "#", "<>", "~"];
-
 const colorOptions = [
   { label: "Citrus Grün", value: "#7AC943" },
   { label: "Warm Orange", value: "#FF7A1A" },
@@ -39,6 +37,15 @@ const colorOptions = [
   { label: "Creme Gold", value: "#F7D774" },
   { label: "Schwarz Gold", value: "#111111" },
 ];
+
+type PixabayImage = {
+  id: number;
+  previewUrl: string;
+  webformatUrl: string;
+  largeImageUrl?: string;
+  user: string;
+  tags: string;
+};
 
 const gradientOptions = [
   { label: "Sunrise", value: "linear-gradient(135deg, #FF7A1A, #FFD400)" },
@@ -88,15 +95,23 @@ export function BottomSheet({
   const [imageFile, setImageFile] = useState<File | undefined>();
   const [imageError, setImageError] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
-  const [backgroundType, setBackgroundType] = useState<BackgroundType>("emoji");
-  const [backgroundValue, setBackgroundValue] = useState("");
+  const [backgroundType, setBackgroundType] = useState<BackgroundType>("color");
+  const [backgroundValue, setBackgroundValue] = useState(colorOptions[0]?.value ?? "");
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
+  const [pixabayOpen, setPixabayOpen] = useState(false);
+  const [pixabayQuery, setPixabayQuery] = useState("");
+  const [pixabayResults, setPixabayResults] = useState<PixabayImage[]>([]);
+  const [pixabayLoading, setPixabayLoading] = useState(false);
+  const [pixabayError, setPixabayError] = useState("");
   const [dragY, setDragY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef<{ x: number; y: number; scrollTop: number } | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const libraryInputRef = useRef<HTMLInputElement>(null);
 
   const internalMemberships = memberships.filter((membership) => membership.group.scope === "internal");
   const internalGroups = groups.filter((group) => group.scope === "internal");
@@ -134,8 +149,9 @@ export function BottomSheet({
       setDescription(draft.description || "");
       setCategory(draft.category || "");
       setEmoji(draft.emoji || "*");
-      setBackgroundType(draft.backgroundType || "emoji");
-      setBackgroundValue(draft.backgroundValue || "");
+      const nextBackgroundType = draft.backgroundType === "emoji" ? "color" : draft.backgroundType || "color";
+      setBackgroundType(nextBackgroundType);
+      setBackgroundValue(draft.backgroundType === "gradient" ? draft.backgroundValue || gradientOptions[0]?.value || "" : draft.backgroundValue || colorOptions[0]?.value || "");
       setIsAnonymous(Boolean(draft.isAnonymous));
     } catch {
       sessionStorage.removeItem(DRAFT_KEY);
@@ -182,25 +198,25 @@ export function BottomSheet({
     setEmoji("*");
     setImageFile(undefined);
     setImageError("");
-    setBackgroundType("emoji");
-    setBackgroundValue("");
+    setBackgroundType("color");
+    setBackgroundValue(colorOptions[0]?.value ?? "");
     setIsAnonymous(false);
     setSubmitting(false);
+    setPhotoSheetOpen(false);
+    setPixabayOpen(false);
+    setPixabayQuery("");
+    setPixabayResults([]);
+    setPixabayError("");
   }
 
   function requestClose() {
-    if (hasDraft) {
-      const keepDraft = window.confirm("Entwurf behalten? OK behält ihn, Abbrechen verwirft ihn.");
-      if (!keepDraft) resetDraft();
-      onClose();
-      return;
-    }
-    resetDraft();
     onClose();
   }
 
   function startDrag(event: ReactPointerEvent<HTMLElement>) {
     if (!open || isInteractiveTarget(event.target)) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.matches("input, textarea, select")) return;
     const scrollTop = bodyRef.current?.scrollTop ?? 0;
     dragStart.current = { x: event.clientX, y: event.clientY, scrollTop };
     setIsDragging(true);
@@ -212,7 +228,8 @@ export function BottomSheet({
     if (!isDragging || !start) return;
     const deltaY = event.clientY - start.y;
     const deltaX = Math.abs(event.clientX - start.x);
-    if (deltaY <= 0 || deltaX > deltaY * 1.25 || start.scrollTop > 0) return;
+    const currentScrollTop = bodyRef.current?.scrollTop ?? start.scrollTop;
+    if (deltaY <= 0 || deltaX > deltaY * 1.25 || currentScrollTop > 0) return;
     setDragY(Math.max(0, deltaY));
   }
 
@@ -251,11 +268,74 @@ export function BottomSheet({
   }
 
   function chooseImage(file?: File) {
+    if (file && !file.type.startsWith("image/")) {
+      setImageError("Bitte wähle eine Bilddatei.");
+      return;
+    }
     setImageFile(file);
     setImageError("");
     if (file) {
       setBackgroundType("image");
       setBackgroundValue("");
+    }
+  }
+
+  function chooseVisualMode(mode: BackgroundType) {
+    setBackgroundType(mode);
+    if (mode === "image") {
+      setPhotoSheetOpen(true);
+      return;
+    }
+    setImageFile(undefined);
+    setImageError("");
+    setBackgroundValue(mode === "gradient" ? gradientOptions[0]?.value ?? "" : colorOptions[0]?.value ?? "");
+  }
+
+  function openPixabay() {
+    setPhotoSheetOpen(false);
+    setPixabayOpen(true);
+    setPixabayError("");
+  }
+
+  async function searchPixabay() {
+    const query = pixabayQuery.trim();
+    if (!query) {
+      setPixabayError("Bitte gib einen Suchbegriff ein.");
+      return;
+    }
+    setPixabayLoading(true);
+    setPixabayError("");
+    try {
+      const response = await fetch(`/api/pixabay-search?q=${encodeURIComponent(query)}`);
+      const payload = await response.json().catch(() => null) as { images?: PixabayImage[]; error?: string } | null;
+      if (!response.ok) throw new Error(payload?.error || "Pixabay konnte nicht geladen werden.");
+      const images = payload?.images ?? [];
+      setPixabayResults(images);
+      if (!images.length) setPixabayError("Keine Bilder gefunden.");
+    } catch (error) {
+      setPixabayResults([]);
+      setPixabayError(error instanceof Error ? error.message : "Pixabay konnte nicht geladen werden.");
+    } finally {
+      setPixabayLoading(false);
+    }
+  }
+
+  async function choosePixabayImage(image: PixabayImage) {
+    setPixabayLoading(true);
+    setPixabayError("");
+    try {
+      const sourceUrl = image.largeImageUrl || image.webformatUrl;
+      const response = await fetch(`/api/pixabay-image?url=${encodeURIComponent(sourceUrl)}`);
+      if (!response.ok) throw new Error("Bild konnte nicht geladen werden.");
+      const blob = await response.blob();
+      const file = new File([blob], `pixabay-${image.id}.jpg`, { type: blob.type || "image/jpeg" });
+      chooseImage(file);
+      setPixabayOpen(false);
+      setPhotoSheetOpen(false);
+    } catch (error) {
+      setPixabayError(error instanceof Error ? error.message : "Bild konnte nicht übernommen werden.");
+    } finally {
+      setPixabayLoading(false);
     }
   }
 
@@ -376,9 +456,9 @@ export function BottomSheet({
             <section className="wizard-step">
               <h2>Darstellung wählen</h2>
               <div className="visual-mode-grid" data-no-sheet-drag>
-                {(["image", "color", "gradient", "emoji"] as BackgroundType[]).map((mode) => (
-                  <button className={backgroundType === mode ? "active" : ""} type="button" key={mode} onClick={() => { setBackgroundType(mode); if (mode !== "image") setImageFile(undefined); }}>
-                    {mode === "image" ? "Foto" : mode === "color" ? "Farbe" : mode === "gradient" ? "Verlauf" : "Emoji"}
+                {(["color", "gradient", "image"] as BackgroundType[]).map((mode) => (
+                  <button className={backgroundType === mode ? "active" : ""} type="button" key={mode} onClick={() => chooseVisualMode(mode)}>
+                    {mode === "image" ? "Foto" : mode === "color" ? "Farbe" : "Verlauf"}
                   </button>
                 ))}
               </div>
@@ -386,14 +466,18 @@ export function BottomSheet({
               {backgroundType === "image" ? (
                 <>
                   {previewUrl ? <div className="image-preview"><img src={previewUrl} alt="" /><button type="button" onClick={() => chooseImage(undefined)}>Bild entfernen</button></div> : null}
-                  <label className="file-picker"><span>Foto wählen</span><small>{imageFile ? imageFile.name : "Standard-Dateiauswahl, kein erzwungener Kamera-Modus."}</small><input type="file" accept="image/*" onChange={(event) => chooseImage(event.target.files?.[0])} /></label>
+                  <button className="file-picker photo-source-trigger" type="button" onClick={() => setPhotoSheetOpen(true)}>
+                    <span>Foto wählen</span>
+                    <small>{imageFile ? imageFile.name : "Aufnehmen, auswählen oder Pixabay durchsuchen."}</small>
+                  </button>
+                  <input ref={cameraInputRef} className="hidden-file-input" type="file" accept="image/*" capture="environment" onChange={(event) => { chooseImage(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+                  <input ref={libraryInputRef} className="hidden-file-input" type="file" accept="image/*" onChange={(event) => { chooseImage(event.target.files?.[0]); event.currentTarget.value = ""; }} />
                   {imageError ? <p className="field-error">{imageError}</p> : null}
                 </>
               ) : null}
 
               {backgroundType === "color" ? <div className="swatch-grid" data-no-sheet-drag>{colorOptions.map((option) => <button className={backgroundValue === option.value ? "active" : ""} type="button" key={option.value} onClick={() => setBackgroundValue(option.value)}><span style={{ background: option.value }} />{option.label}</button>)}</div> : null}
               {backgroundType === "gradient" ? <div className="swatch-grid" data-no-sheet-drag>{gradientOptions.map((option) => <button className={backgroundValue === option.value ? "active" : ""} type="button" key={option.value} onClick={() => setBackgroundValue(option.value)}><span style={{ background: option.value }} />{option.label}</button>)}</div> : null}
-              {backgroundType === "emoji" ? <div className="emoji-grid" data-no-sheet-drag>{quickEmoji.map((item) => <button className={emoji === item ? "active" : ""} type="button" key={item} onClick={() => { setEmoji(item); setBackgroundValue(""); }}>{item}</button>)}</div> : null}
             </section>
           ) : null}
 
@@ -407,7 +491,6 @@ export function BottomSheet({
               </div>
               <article className={`movement-card preview-card visual-preview ${previewUrl ? "has-image" : ""}`} style={visualPreviewStyle}>
                 {previewUrl ? <img className="reel-image" src={previewUrl} alt="" /> : null}
-                {!previewUrl && backgroundType === "emoji" ? <div className="preview-emoji">{emoji}</div> : null}
                 <h3>{title || "Dein Anliegen"}</h3>
                 <p>{selectedGroup?.name} - {typeLabels.find((item) => item.id === type)?.label || "Typ"} - {isAnonymous ? "Anonym" : "Mit Namen"}</p>
                 <div className="movement-meta"><strong>0 Stimmen</strong><span>{description.slice(0, 110)}</span></div>
@@ -417,6 +500,11 @@ export function BottomSheet({
         </div>
 
         <div className="wizard-footer" data-no-sheet-drag>
+          {hasDraft ? (
+            <button className="reset-button sheet-discard-button" type="button" onClick={resetDraft}>
+              Entwurf verwerfen
+            </button>
+          ) : null}
           {step < totalSteps ? (
             <button className="primary-button" type="button" onClick={goNext} disabled={!canContinue}>Weiter</button>
           ) : (
@@ -426,6 +514,44 @@ export function BottomSheet({
           )}
         </div>
       </aside>
+      {photoSheetOpen ? (
+        <div className="action-sheet-backdrop" onClick={() => setPhotoSheetOpen(false)}>
+          <section className="photo-action-sheet" role="dialog" aria-modal="true" aria-label="Foto auswählen" onClick={(event) => event.stopPropagation()}>
+            <button type="button" onClick={() => { setPhotoSheetOpen(false); cameraInputRef.current?.click(); }}>Foto aufnehmen</button>
+            <button type="button" onClick={() => { setPhotoSheetOpen(false); libraryInputRef.current?.click(); }}>Foto auswählen</button>
+            <button type="button" onClick={openPixabay}>Pixabay durchsuchen</button>
+            <button className="cancel" type="button" onClick={() => setPhotoSheetOpen(false)}>Abbrechen</button>
+          </section>
+        </div>
+      ) : null}
+      {pixabayOpen ? (
+        <div className="action-sheet-backdrop" onClick={() => setPixabayOpen(false)}>
+          <section className="pixabay-sheet" role="dialog" aria-modal="true" aria-labelledby="pixabay-title" onClick={(event) => event.stopPropagation()}>
+            <div className="pixabay-sheet-header">
+              <div>
+                <span>Foto</span>
+                <h3 id="pixabay-title">Pixabay durchsuchen</h3>
+              </div>
+              <button className="icon-button" type="button" onClick={() => setPixabayOpen(false)} aria-label="Pixabay schließen">
+                <Icon name="x" size={20} />
+              </button>
+            </div>
+            <form className="pixabay-search-row" onSubmit={(event) => { event.preventDefault(); void searchPixabay(); }}>
+              <input value={pixabayQuery} onChange={(event) => setPixabayQuery(event.target.value)} placeholder="Suchbegriff" />
+              <button type="submit" disabled={pixabayLoading || !pixabayQuery.trim()}>{pixabayLoading ? "..." : "Suchen"}</button>
+            </form>
+            {pixabayError ? <p className="field-error">{pixabayError}</p> : null}
+            <div className="pixabay-grid">
+              {pixabayResults.map((image) => (
+                <button type="button" key={image.id} onClick={() => void choosePixabayImage(image)} disabled={pixabayLoading}>
+                  <img src={image.previewUrl} alt={image.tags} />
+                  <span>{image.user}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </>
   );
 }

@@ -9,7 +9,7 @@ type AuthContextValue = {
   profile: Profile | null;
   loading: boolean;
   signUp: (username: string, email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (identifier: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   signOutEverywhere: () => Promise<void>;
   updateEmail: (email: string) => Promise<void>;
@@ -44,6 +44,8 @@ function mapProfile(row: {
   display_name: string | null;
   avatar_url: string | null;
   role: UserRole | null;
+  status?: "active" | "banned" | null;
+  is_banned?: boolean | null;
   has_seen_conduct_notice: boolean | null;
   deletion_requested_at: string | null;
   deleted_at: string | null;
@@ -56,6 +58,8 @@ function mapProfile(row: {
     displayName: row.display_name || row.username || displayNameFromEmail(row.email),
     avatarUrl: row.avatar_url,
     role: row.role ?? "user",
+    status: row.status ?? (row.is_banned ? "banned" : "active"),
+    isBanned: Boolean(row.is_banned) || row.status === "banned",
     hasSeenConductNotice: Boolean(row.has_seen_conduct_notice),
     deletionRequestedAt: row.deletion_requested_at,
     deletedAt: row.deleted_at,
@@ -68,6 +72,21 @@ function explainAuthError(error: AuthError | Error) {
   return error.message || "Auth-Fehler ohne Detailmeldung.";
 }
 
+function isEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function friendlyAuthError(error: AuthError | Error) {
+  const message = explainAuthError(error).toLowerCase();
+  if (message.includes("invalid login credentials")) return "Passwort stimmt nicht.";
+  if (message.includes("email not confirmed")) return "Bitte bestätige zuerst deine E-Mail.";
+  return error.message || "Auth-Vorgang fehlgeschlagen.";
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -77,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured) throw new Error(getSupabaseConfigError());
 
     const selectColumns =
-      "id,email,username,display_name,avatar_url,role,has_seen_conduct_notice,deletion_requested_at,deleted_at,created_at";
+      "id,email,username,display_name,avatar_url,role,status,is_banned,has_seen_conduct_notice,deletion_requested_at,deleted_at,created_at";
 
     const existing = await supabase
       .from("profiles")
@@ -92,11 +111,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (existing.data) {
       const mapped = mapProfile(existing.data);
+      if (mapped.isBanned || mapped.deletedAt) {
+        await supabase.auth.signOut();
+        setSession(null);
+        setProfile(null);
+        throw new Error("Dieser Account wurde gesperrt.");
+      }
       setProfile(mapped);
       return mapped;
     }
 
-    const email = user.email ?? "";
+    const email = normalizeEmail(user.email ?? "");
     const baseUsername = cleanUsername(preferredUsername || user.user_metadata?.username || email.split("@")[0]);
     const displayName = user.user_metadata?.display_name || baseUsername || displayNameFromEmail(email);
     const suffix = user.id.replace(/-/g, "").slice(0, 4);
@@ -112,6 +137,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           username,
           display_name: displayName,
           role: "user",
+          status: "active",
+          is_banned: false,
           has_seen_conduct_notice: false,
         })
         .select(selectColumns)
@@ -210,8 +237,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       async signUp(username: string, email: string, password: string) {
         if (!isSupabaseConfigured) throw new Error(getSupabaseConfigError());
         const clean = cleanUsername(username);
+        const normalizedEmail = normalizeEmail(email);
+        const existsCheck = await supabase.rpc("profile_identifier_exists", {
+          email_input: normalizedEmail,
+          username_input: clean,
+        });
+        const exists = existsCheck.error ? null : existsCheck.data as { email_exists?: boolean; username_exists?: boolean } | null;
+        if (exists?.username_exists) throw new Error("Dieser Benutzername ist bereits vergeben.");
+        if (exists?.email_exists) throw new Error("Diese E-Mail ist bereits registriert.");
         const { data, error } = await supabase.auth.signUp({
-          email,
+          email: normalizedEmail,
           password,
           options: {
             data: {
@@ -220,7 +255,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             },
           },
         });
-        if (error) throw new Error(explainAuthError(error));
+        if (error) throw new Error(friendlyAuthError(error));
         if (!data.user) throw new Error("Registrierung hat keinen Supabase-User zurückgegeben.");
         if (!data.session) {
           console.info("[Citrus] Signup created user but no session. Email confirmation is likely enabled.");
@@ -229,10 +264,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await ensureProfile(data.user, clean);
         return { needsConfirmation: false };
       },
-      async signIn(email: string, password: string) {
+      async signIn(identifier: string, password: string) {
         if (!isSupabaseConfigured) throw new Error(getSupabaseConfigError());
+        const normalizedIdentifier = identifier.trim();
+        let email = isEmail(normalizedIdentifier) ? normalizeEmail(normalizedIdentifier) : "";
+        if (!email) {
+          const { data: profileMatch, error: lookupError } = await supabase.rpc("resolve_login_identifier", {
+            identifier: normalizedIdentifier,
+          });
+          const resolved = Array.isArray(profileMatch) ? profileMatch[0] : profileMatch;
+          if (lookupError || !resolved?.email) throw new Error("Benutzername oder E-Mail nicht gefunden.");
+          if (resolved.is_banned || resolved.status === "banned" || resolved.deleted_at) {
+            throw new Error("Dieser Account wurde gesperrt.");
+          }
+          email = normalizeEmail(resolved.email);
+        }
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw new Error(explainAuthError(error));
+        if (error) throw new Error(friendlyAuthError(error));
         if (!data.user) throw new Error("Login hat keinen Supabase-User zurückgegeben.");
         await ensureProfile(data.user);
       },

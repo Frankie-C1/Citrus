@@ -163,13 +163,13 @@ export function Feed({
       <header className="feed-topbar">
         <div className="feed-filter-wrap">
           <button className="feed-title-button" type="button" onClick={() => setFilterOpen((open) => !open)} aria-expanded={filterOpen}>
-            <span>{selectedGroup ? selectedGroup.name : "Alle"}</span>
+            <span>{selectedGroup ? selectedGroup.name : "Feed"}</span>
             <Icon name="chevron" size={18} />
           </button>
           {filterOpen ? (
             <div className="feed-filter-menu">
               <button className={!groupFilterId ? "active" : ""} type="button" onClick={chooseAll}>
-                <span><strong>Alle</strong><small>Alle sichtbaren internen Anliegen</small></span>
+                <span><strong>Trending</strong><small>Alle sichtbaren internen Anliegen</small></span>
                 {!groupFilterId ? <Icon name="checkCircle" size={18} /> : null}
               </button>
               {groups.map((group) => (

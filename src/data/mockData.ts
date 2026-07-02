@@ -144,5 +144,5 @@ export const mockStats: UserStats = {
   activeGroups: 4,
   comments: 2,
   risingTopics: 1,
-  weeklyReach: [18, 28, 45, 38, 68, 82, 94],
+  weeklyReach: [0, 0, 0, 0, 0, 0, 0],
 };

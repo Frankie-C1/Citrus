@@ -1,8 +1,9 @@
-import type { Movement, Notification } from "../types";
+import type { Movement, Notification, NotificationDetail } from "../types";
 import { Icon } from "../components/Icon";
 
 type NotificationsProps = {
   notifications: Notification[];
+  detail?: NotificationDetail;
   movements: Movement[];
   isAuthenticated: boolean;
   onBack: () => void;
@@ -24,6 +25,7 @@ function formatNotificationDate(value?: string) {
 
 export function Notifications({
   notifications,
+  detail,
   movements,
   isAuthenticated,
   onBack,
@@ -40,6 +42,44 @@ export function Notifications({
       ? movements.find((item) => item.id === notification.movementId)
       : undefined;
     if (movement) onOpenMovement(movement);
+  }
+
+  if (detail) {
+    const movement = detail.movement;
+    return (
+      <div className="screen notifications-screen">
+        <header className="notifications-header">
+          <button className="home-round-button" type="button" onClick={onBack} aria-label="Zurück">
+            <Icon name="chevronRight" size={24} />
+          </button>
+          <div>
+            <span>{detail.typeLabel}</span>
+            <h1>{detail.notification.title}</h1>
+          </div>
+        </header>
+
+        <section className="notification-detail-card">
+          <dl>
+            <div><dt>Typ</dt><dd>{detail.typeLabel}</dd></div>
+            {detail.content ? <div><dt>Inhalt</dt><dd>{detail.content}</dd></div> : null}
+            {movement ? <div><dt>Beitrag</dt><dd>{movement.title}</dd></div> : null}
+            {detail.actorName || detail.actorEmail ? <div><dt>Nutzer</dt><dd>{[detail.actorName, detail.actorEmail].filter(Boolean).join(" · ")}</dd></div> : null}
+            {detail.groupName ? <div><dt>Gruppe</dt><dd>{detail.groupName}</dd></div> : null}
+            {detail.createdAt ? <div><dt>Zeitpunkt</dt><dd>{formatNotificationDate(detail.createdAt)}</dd></div> : null}
+          </dl>
+          {movement ? (
+            <button className="primary-button muted" type="button" onClick={() => onOpenMovement(movement)}>
+              Beitrag öffnen
+            </button>
+          ) : null}
+          {detail.adminActions?.length ? (
+            <div className="notification-admin-actions">
+              {detail.adminActions.map((action) => <span key={action}>{action}</span>)}
+            </div>
+          ) : null}
+        </section>
+      </div>
+    );
   }
 
   return (
@@ -81,9 +121,9 @@ export function Notifications({
               <div>
                 <strong>{notification.title}</strong>
                 {notification.body ? <p>{notification.body}</p> : null}
-                <small>{formatNotificationDate(notification.createdAt)}</small>
+                <small>{[notification.isAdminNotification ? "Admin" : null, notification.type || notification.targetType, formatNotificationDate(notification.createdAt)].filter(Boolean).join(" · ")}</small>
               </div>
-              {notification.movementId ? <Icon name="chevronRight" size={20} /> : null}
+              <Icon name="chevronRight" size={20} />
             </button>
           ))}
         </div>

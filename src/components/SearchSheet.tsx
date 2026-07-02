@@ -63,13 +63,16 @@ export function SearchSheet({ open, movements, onClose, onOpenMovement }: Search
 
   function isInteractiveTarget(target: EventTarget | null) {
     const element = target instanceof HTMLElement ? target : null;
-    if (element?.closest(".search-sheet-handle")) return false;
-    if (element?.closest(".search-sheet-header") && !element.closest("button, a, input, textarea, select")) return false;
     return Boolean(element?.closest("input, textarea, select, button, a"));
   }
 
   function startDrag(event: PointerEvent<HTMLElement>) {
-    if (!open || isInteractiveTarget(event.target)) return;
+    if (!open) return;
+    const element = event.target instanceof HTMLElement ? event.target : null;
+    const fromHandle = Boolean(element?.closest(".search-sheet-handle"));
+    const fromResults = Boolean(element?.closest(".search-sheet-results"));
+    if (!fromHandle && !fromResults) return;
+    if (!fromHandle && !fromResults && isInteractiveTarget(event.target)) return;
     dragStart.current = { x: event.clientX, y: event.clientY, scrollTop: resultsRef.current?.scrollTop ?? 0 };
     setIsDragging(true);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -80,13 +83,19 @@ export function SearchSheet({ open, movements, onClose, onOpenMovement }: Search
     if (!isDragging || !start) return;
     const deltaY = event.clientY - start.y;
     const deltaX = Math.abs(event.clientX - start.x);
-    if (deltaY <= 0 || deltaX > deltaY * 1.25 || start.scrollTop > 0) return;
+    const currentScrollTop = resultsRef.current?.scrollTop ?? start.scrollTop;
+    if (deltaY <= 0 || deltaX > deltaY * 1.25 || currentScrollTop > 0) return;
+    event.preventDefault();
     setDragY(Math.max(0, deltaY));
   }
 
   function endDrag(event: PointerEvent<HTMLElement>) {
     if (!isDragging) return;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Mobile browsers may release pointer capture automatically.
+    }
     setIsDragging(false);
     const shouldClose = dragY > 76;
     setDragY(0);
